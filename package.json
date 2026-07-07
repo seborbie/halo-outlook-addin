@@ -1,0 +1,14 @@
+{
+  "name": "halo-outlook-addin",
+  "module": "index.ts",
+  "type": "module",
+  "private": true,
+  "devDependencies": {
+    "@types/bun": "latest",
+    "generator-office": "^3.0.2",
+    "yo": "^7.0.1"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  }
+}
