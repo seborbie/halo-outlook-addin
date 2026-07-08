@@ -3,6 +3,7 @@
 const devCerts = require("office-addin-dev-certs");
 const CopyWebpackPlugin = require("copy-webpack-plugin");
 const HtmlWebpackPlugin = require("html-webpack-plugin");
+const path = require("path");
 const { registerHaloAuthRoutes } = require("./server/haloAuth");
 
 const urlDev = "https://localhost:3000/";
@@ -64,6 +65,10 @@ module.exports = async (env, options) => {
             to: "assets/[name][ext][query]",
           },
           {
+            from: "src/commands/classic-send-runtime.js",
+            to: "classic-send-runtime.js",
+          },
+          {
             from: "manifest*.xml",
             to: "[name]" + "[ext]",
             transform(content) {
@@ -85,6 +90,10 @@ module.exports = async (env, options) => {
     devServer: {
       headers: {
         "Access-Control-Allow-Origin": "*",
+      },
+      static: {
+        directory: path.join(__dirname, "dist"),
+        publicPath: "/public",
       },
       setupMiddlewares: (middlewares, devServer) => {
         if (!devServer || !devServer.app) {

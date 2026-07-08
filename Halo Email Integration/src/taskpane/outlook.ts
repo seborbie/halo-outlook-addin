@@ -1,6 +1,7 @@
 /* global document, Office, fetch, localStorage, RequestInit, HTMLInputElement, HTMLButtonElement, HTMLElement */
 
 const CONNECTION_STORAGE_KEY = "halo-auth-connection-v1";
+const BACKGROUND_SESSION_STORAGE_KEY = "halo-auth-background-session-v1";
 
 type AuthStartResponse = {
   dialogUrl: string;
@@ -9,6 +10,12 @@ type AuthStartResponse = {
 type AuthStatusResponse = {
   authenticated: boolean;
   haloUrl?: string;
+  expiresAt?: string;
+};
+
+type AuthCompleteResponse = {
+  authenticated: boolean;
+  backgroundSessionId?: string;
   expiresAt?: string;
 };
 
@@ -57,16 +64,34 @@ type OutlookEmailPayload = {
   conversationId: string;
   dateTimeCreated: string;
   from: EmailAddressPayload | null;
+  inReplyToMessageIds: string[];
+  internetHeaders: string;
   internetMessageId: string;
   itemId: string;
+  mailboxEmail: string;
   normalizedSubject: string;
+  referenceMessageIds: string[];
   subject: string;
+  timeZone: string;
   to: EmailAddressPayload[];
 };
 
 type HaloAttachEmailResponse = {
   ok: boolean;
+  attachMode?: "full-chain" | "latest-reply";
   message: string;
+  actionId?: string;
+  backgroundSessionId?: string;
+  error?: string;
+  debug?: unknown;
+};
+
+type HaloAutoAttachResponse = {
+  ok: boolean;
+  status: "attached" | "already-attached" | "no-match";
+  ticketId?: string;
+  ticketNumber?: string;
+  message?: string;
   actionId?: string;
   error?: string;
   debug?: unknown;
@@ -83,6 +108,7 @@ type StoredConnection = {
 
 let currentDialog: Office.Dialog | null = null;
 let waitingForDialog = false;
+let checkingSession = false;
 
 Office.onReady((info) => {
   if (info.host === Office.HostType.Outlook) {
@@ -110,9 +136,16 @@ function bindControls() {
   getLoginButton().onclick = startHaloLogin;
   getLogoutButton().onclick = logout;
   getRefreshTicketsButton().onclick = () => void loadTickets();
+  registerItemChangedHandler();
 }
 
 async function checkExistingSession() {
+  if (checkingSession || waitingForDialog) {
+    return;
+  }
+
+  checkingSession = true;
+
   try {
     const status = await fetchJson<AuthStatusResponse>("/api/auth/status");
 
@@ -123,11 +156,15 @@ async function checkExistingSession() {
 
     setBusy(true);
     setStatus("loading", "Checking Halo API auth...", status.haloUrl || "");
+    await refreshBackgroundSessionId();
     await pingHalo();
-    await loadTickets();
+    if (!(await autoAttachCurrentEmail())) {
+      await loadTickets();
+    }
   } catch (error) {
     setFailed(error);
   } finally {
+    checkingSession = false;
     setBusy(false);
   }
 }
@@ -224,13 +261,16 @@ async function onDialogMessageReceived(arg: { message: string }) {
 
   try {
     setStatus("loading", "Completing Halo login...", "");
-    await fetchJson("/api/auth/complete", {
+    const complete = await fetchJson<AuthCompleteResponse>("/api/auth/complete", {
       method: "POST",
       body: JSON.stringify({ handoffCode: message.handoffCode }),
     });
+    await saveBackgroundSessionId(complete.backgroundSessionId || "");
     saveConnectionSettings();
     await pingHalo();
-    await loadTickets();
+    if (!(await autoAttachCurrentEmail())) {
+      await loadTickets();
+    }
   } catch (error) {
     setFailed(error);
   } finally {
@@ -300,6 +340,69 @@ async function loadTickets() {
   }
 }
 
+async function autoAttachCurrentEmail(): Promise<boolean> {
+  let email: OutlookEmailPayload | null = null;
+
+  try {
+    email = await readCurrentOutlookEmail({ suppressUnsupported: true });
+  } catch {
+    return false;
+  }
+
+  if (!email) {
+    return false;
+  }
+
+  try {
+    setStatus(
+      "loading",
+      "Checking Halo email mapping...",
+      "Looking for an existing ticket link for this email chain."
+    );
+
+    const result = await fetchJson<HaloAutoAttachResponse>("/api/halo/email/auto-attach", {
+      method: "POST",
+      body: JSON.stringify(email),
+    });
+
+    if (!result.ok) {
+      throw createHaloAuthError(
+        result.error || result.message || "Email auto-attach failed.",
+        result.debug
+      );
+    }
+
+    if (result.status === "no-match") {
+      return false;
+    }
+
+    clearTickets();
+    getLogoutButton().hidden = false;
+
+    if (result.status === "already-attached") {
+      setStatus(
+        "success",
+        "This email is already attached to ticket",
+        result.message ||
+          `This email is already attached to ticket ${result.ticketNumber || result.ticketId}.`
+      );
+      return true;
+    }
+
+    setStatus(
+      "success",
+      "Email automatically added to ticket",
+      result.message ||
+        `Email automatically added to ticket ${result.ticketNumber || result.ticketId}.`
+    );
+    return true;
+  } catch (error) {
+    clearTickets();
+    setFailed(error, { hideLogout: false, message: "Email auto-attach failed" });
+    return true;
+  }
+}
+
 async function logout() {
   try {
     setBusy(true);
@@ -307,6 +410,7 @@ async function logout() {
       method: "POST",
       body: JSON.stringify({}),
     });
+    await clearBackgroundSessionId();
     clearTickets();
     setSignedOut();
   } catch (error) {
@@ -324,6 +428,22 @@ function closeDialog() {
   if (dialog) {
     dialog.close();
   }
+}
+
+function registerItemChangedHandler() {
+  const mailbox = Office.context.mailbox as unknown as {
+    addHandlerAsync?: (
+      eventType: Office.EventType,
+      handler: () => void,
+      callback?: (result: Office.AsyncResult<void>) => void
+    ) => void;
+  };
+
+  if (!mailbox.addHandlerAsync || !Office.EventType.ItemChanged) {
+    return;
+  }
+
+  mailbox.addHandlerAsync(Office.EventType.ItemChanged, () => void checkExistingSession());
 }
 
 async function fetchJson<T>(url: string, options: RequestInit = {}): Promise<T> {
@@ -442,6 +562,45 @@ function saveConnectionSettings() {
   localStorage.setItem(CONNECTION_STORAGE_KEY, JSON.stringify(stored));
 }
 
+function saveBackgroundSessionId(backgroundSessionId: string): Promise<void> {
+  if (!backgroundSessionId || !Office.context.roamingSettings) {
+    return Promise.resolve();
+  }
+
+  Office.context.roamingSettings.set(BACKGROUND_SESSION_STORAGE_KEY, backgroundSessionId);
+  return saveRoamingSettings();
+}
+
+async function refreshBackgroundSessionId(): Promise<void> {
+  try {
+    const result = await fetchJson<{ backgroundSessionId?: string; ok?: boolean }>(
+      "/api/auth/background-session",
+      {
+        method: "POST",
+        body: JSON.stringify({}),
+      }
+    );
+    await saveBackgroundSessionId(result.backgroundSessionId || "");
+  } catch {
+    // The task pane can still use the normal cookie session; send events will no-op without a handle.
+  }
+}
+
+function clearBackgroundSessionId(): Promise<void> {
+  if (!Office.context.roamingSettings) {
+    return Promise.resolve();
+  }
+
+  Office.context.roamingSettings.remove(BACKGROUND_SESSION_STORAGE_KEY);
+  return saveRoamingSettings();
+}
+
+function saveRoamingSettings(): Promise<void> {
+  return new Promise((resolve) => {
+    Office.context.roamingSettings.saveAsync(() => resolve());
+  });
+}
+
 function createHaloAuthError(message: string, debug?: unknown): HaloAuthError {
   const error = new Error(message) as HaloAuthError;
   error.debug = debug;
@@ -518,11 +677,18 @@ async function attachEmailToTicket(ticket: HaloTicket, selectedButton: HTMLEleme
     setStatus("loading", "Attaching email to Halo ticket...", formatTicketTitle(ticket));
 
     const email = await readCurrentOutlookEmail();
+    if (!email) {
+      throw createHaloAuthError("Open an existing received email, then choose a Halo ticket.");
+    }
+
     const result = await fetchJson<HaloAttachEmailResponse>(
       `/api/halo/tickets/${encodeURIComponent(ticket.id)}/email`,
       {
         method: "POST",
-        body: JSON.stringify(email),
+        body: JSON.stringify({
+          ...email,
+          ticketNumber: ticket.ticketNumber || ticket.id,
+        }),
       }
     );
 
@@ -533,9 +699,11 @@ async function attachEmailToTicket(ticket: HaloTicket, selectedButton: HTMLEleme
       );
     }
 
+    await saveBackgroundSessionId(result.backgroundSessionId || "");
+    const successMessage = result.message || "Email attached to Halo ticket";
     setStatus(
       "success",
-      "Email attached to Halo ticket",
+      successMessage,
       `Attached ${email.subject || "selected email"} to ${ticket.ticketNumber || ticket.id}.`
     );
   } catch (error) {
@@ -578,7 +746,9 @@ function clearTicketList() {
   }
 }
 
-async function readCurrentOutlookEmail(): Promise<OutlookEmailPayload> {
+async function readCurrentOutlookEmail(
+  options: { suppressUnsupported?: boolean } = {}
+): Promise<OutlookEmailPayload | null> {
   const item = Office.context.mailbox.item as unknown as {
     body?: {
       getAsync: (
@@ -590,6 +760,7 @@ async function readCurrentOutlookEmail(): Promise<OutlookEmailPayload> {
     conversationId?: string;
     dateTimeCreated?: Date;
     from?: Office.EmailAddressDetails;
+    getAllInternetHeadersAsync?: (callback: (result: Office.AsyncResult<string>) => void) => void;
     internetMessageId?: string;
     itemId?: string;
     itemType?: Office.MailboxEnums.ItemType | string;
@@ -605,13 +776,24 @@ async function readCurrentOutlookEmail(): Promise<OutlookEmailPayload> {
     !item.itemId ||
     !item.body
   ) {
+    if (options.suppressUnsupported) {
+      return null;
+    }
+
     throw createHaloAuthError("Open an existing received email, then choose a Halo ticket.");
   }
 
   const body = await readMessageBody(item);
   if (!body.bodyHtml && !body.bodyText) {
+    if (options.suppressUnsupported) {
+      return null;
+    }
+
     throw createHaloAuthError("Could not read an email body to attach.");
   }
+
+  const internetHeaders = await readInternetHeaders(item);
+  const userProfile = Office.context.mailbox.userProfile;
 
   return {
     ...body,
@@ -621,12 +803,25 @@ async function readCurrentOutlookEmail(): Promise<OutlookEmailPayload> {
       ? item.dateTimeCreated.toISOString()
       : new Date().toISOString(),
     from: normalizeEmailAddress(item.from),
+    inReplyToMessageIds: extractHeaderMessageIds(internetHeaders, "In-Reply-To"),
+    internetHeaders,
     internetMessageId: item.internetMessageId,
     itemId: item.itemId,
+    mailboxEmail: userProfile && userProfile.emailAddress ? userProfile.emailAddress : "",
     normalizedSubject: item.normalizedSubject || "",
+    referenceMessageIds: extractHeaderMessageIds(internetHeaders, "References"),
     subject: item.subject || item.normalizedSubject || "",
+    timeZone: getClientTimeZone(),
     to: normalizeEmailAddressList(item.to),
   };
+}
+
+function getClientTimeZone(): string {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || "";
+  } catch {
+    return "";
+  }
 }
 
 async function readMessageBody(item: {
@@ -672,6 +867,63 @@ function getBodyAsync(
       reject(new Error(result.error.message || "Could not read the selected email body."));
     });
   });
+}
+
+function readInternetHeaders(item: {
+  getAllInternetHeadersAsync?: (callback: (result: Office.AsyncResult<string>) => void) => void;
+}): Promise<string> {
+  return new Promise((resolve) => {
+    if (!item.getAllInternetHeadersAsync) {
+      resolve("");
+      return;
+    }
+
+    item.getAllInternetHeadersAsync((result) => {
+      if (result.status === Office.AsyncResultStatus.Succeeded) {
+        resolve(result.value || "");
+        return;
+      }
+
+      resolve("");
+    });
+  });
+}
+
+function extractHeaderMessageIds(headers: string, headerName: string): string[] {
+  const headerValue = getInternetHeaderValue(headers, headerName);
+
+  if (!headerValue) {
+    return [];
+  }
+
+  const bracketedIds = headerValue.match(/<[^>]+>/g);
+  const candidates = bracketedIds && bracketedIds.length ? bracketedIds : headerValue.split(/\s+/);
+  const seen: { [key: string]: boolean } = {};
+  const messageIds: string[] = [];
+
+  candidates.forEach((candidate) => {
+    const messageId = candidate.trim();
+    const key = messageId.toLowerCase();
+
+    if (messageId && !seen[key]) {
+      seen[key] = true;
+      messageIds.push(messageId);
+    }
+  });
+
+  return messageIds;
+}
+
+function getInternetHeaderValue(headers: string, headerName: string): string {
+  const unfoldedHeaders = headers.replace(/\r?\n[ \t]+/g, " ");
+  const headerPattern = new RegExp(`^${escapeRegExp(headerName)}:\\s*(.*)$`, "im");
+  const match = headerPattern.exec(unfoldedHeaders);
+
+  return match ? match[1].trim() : "";
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function normalizeEmailAddressList(value?: Office.EmailAddressDetails[]): EmailAddressPayload[] {

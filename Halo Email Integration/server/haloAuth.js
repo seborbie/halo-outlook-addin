@@ -15,6 +15,10 @@ const MAX_EMAIL_JSON_BODY_BYTES = 2 * 1024 * 1024;
 const pendingStates = new Map();
 const handoffs = new Map();
 const sessions = new Map();
+const backgroundSessions = new Map();
+const conversationMappings = new Map();
+const conversationMappingsByKey = new Map();
+const messageMappingsByKey = new Map();
 
 const encryptionKey = crypto.randomBytes(32);
 
@@ -166,6 +170,7 @@ function registerHaloAuthRoutes(app) {
       const sessionId = randomBase64Url(32);
       const sessionHash = hashSessionId(sessionId);
       const expiresAt = Date.now() + SESSION_TTL_MS;
+      const backgroundSessionId = createBackgroundSession(sessionHash, expiresAt);
 
       sessions.set(sessionHash, {
         haloUrl: handoff.haloUrl,
@@ -178,11 +183,31 @@ function registerHaloAuthRoutes(app) {
       res.setHeader("Set-Cookie", serializeSessionCookie(sessionId, Math.floor(SESSION_TTL_MS / 1000)));
       sendJson(res, 200, {
         authenticated: true,
+        backgroundSessionId,
         expiresAt: new Date(expiresAt).toISOString(),
       });
     } catch (error) {
       sendJson(res, 400, { error: publicError(error) });
     }
+  });
+
+  app.post("/api/auth/background-session", (req, res) => {
+    const sessionId = getSessionIdFromRequest(req);
+    const record = getSessionRecordBySessionId(sessionId);
+
+    if (!sessionId || !record) {
+      sendJson(res, 401, {
+        ok: false,
+        error: "No active Halo session.",
+      });
+      return;
+    }
+
+    sendJson(res, 200, {
+      ok: true,
+      backgroundSessionId: createBackgroundSession(hashSessionId(sessionId), record.expiresAt),
+      expiresAt: new Date(record.expiresAt).toISOString(),
+    });
   });
 
   app.get("/api/auth/status", (req, res) => {
@@ -276,7 +301,12 @@ function registerHaloAuthRoutes(app) {
       const ticketId = getTicketIdFromRequest(req);
       const body = await readJsonBody(req, MAX_EMAIL_JSON_BODY_BYTES);
       const email = normalizeEmailPayload(body);
-      const actionPayload = buildEmailActionPayload(ticketId, email);
+      const ticketNumber = stringifyField(body.ticketNumber);
+      const existingMapping = findConversationMappingForEmail(email);
+      const isInitialChainAttach = !existingMapping;
+      const actionPayload = buildEmailActionPayload(ticketId, email, {
+        bodyMode: isInitialChainAttach ? "full" : "trimmed",
+      });
       const payload = await callHaloApiWithRefresh(record, {
         body: [actionPayload],
         method: "POST",
@@ -284,11 +314,23 @@ function registerHaloAuthRoutes(app) {
         phase: "email-attach",
         messagePrefix: "Halo email attach failed",
       });
+      const actionId = getCreatedActionId(payload);
+
+      storeConversationMapping({
+        email,
+        includeThreadMessageIds: isInitialChainAttach,
+        ticketId,
+        ticketNumber,
+      });
 
       sendJson(res, 200, {
         ok: true,
-        message: "Email attached to Halo ticket",
-        actionId: getCreatedActionId(payload) || undefined,
+        attachMode: isInitialChainAttach ? "full-chain" : "latest-reply",
+        message: isInitialChainAttach
+          ? "Full email chain attached to Halo ticket"
+          : "Email attached to Halo ticket",
+        actionId: actionId || undefined,
+        backgroundSessionId: createBackgroundSessionForRequest(req) || undefined,
       });
     } catch (error) {
       sendJson(res, getErrorStatus(error, 502), {
@@ -300,11 +342,148 @@ function registerHaloAuthRoutes(app) {
     }
   });
 
+  app.post("/api/halo/email/auto-attach", async (req, res) => {
+    try {
+      const record = getSessionRecord(req);
+
+      if (!record) {
+        sendJson(res, 401, {
+          ok: false,
+          message: "Email auto-attach failed",
+          error: "No active Halo session.",
+        });
+        return;
+      }
+
+      const body = await readJsonBody(req, MAX_EMAIL_JSON_BODY_BYTES);
+      const email = normalizeEmailPayload(body);
+      const match = findConversationMappingForEmail(email);
+
+      if (!match) {
+        sendJson(res, 200, {
+          ok: true,
+          status: "no-match",
+        });
+        return;
+      }
+
+      if (match.status === "already-attached") {
+        sendJson(res, 200, {
+          ok: true,
+          status: "already-attached",
+          ticketId: match.mapping.ticketId,
+          ticketNumber: match.mapping.ticketNumber,
+          message: `This email is already attached to ticket ${getMappingTicketLabel(match.mapping)}.`,
+        });
+        return;
+      }
+
+      const actionPayload = buildEmailActionPayload(match.mapping.ticketId, email);
+      const payload = await callHaloApiWithRefresh(record, {
+        body: [actionPayload],
+        method: "POST",
+        path: "/api/Actions",
+        phase: "email-auto-attach",
+        messagePrefix: "Halo email auto-attach failed",
+      });
+      const actionId = getCreatedActionId(payload);
+
+      markEmailSynced(match.mapping, email);
+
+      sendJson(res, 200, {
+        ok: true,
+        status: "attached",
+        ticketId: match.mapping.ticketId,
+        ticketNumber: match.mapping.ticketNumber,
+        message: `Email automatically added to ticket ${getMappingTicketLabel(match.mapping)}.`,
+        actionId: actionId || undefined,
+      });
+    } catch (error) {
+      sendJson(res, getErrorStatus(error, 502), {
+        ok: false,
+        message: "Email auto-attach failed",
+        error: publicError(error),
+        debug: publicDebug(error),
+      });
+    }
+  });
+
+  app.post("/api/halo/email/send-auto-attach", async (req, res) => {
+    try {
+      const body = await readJsonBody(req, MAX_EMAIL_JSON_BODY_BYTES);
+      const record = getSessionRecord(req) || getBackgroundSessionRecord(body.backgroundSessionId);
+
+      if (!record) {
+        sendJson(res, 200, {
+          ok: true,
+          status: "no-session",
+        });
+        return;
+      }
+
+      const email = normalizeSendEmailPayload(body);
+      const match = findConversationMappingForEmail(email);
+
+      if (!match) {
+        sendJson(res, 200, {
+          ok: true,
+          status: "no-match",
+        });
+        return;
+      }
+
+      if (match.status === "already-attached") {
+        sendJson(res, 200, {
+          ok: true,
+          status: "already-attached",
+          ticketId: match.mapping.ticketId,
+          ticketNumber: match.mapping.ticketNumber,
+          message: `This email is already attached to ticket ${getMappingTicketLabel(match.mapping)}.`,
+        });
+        return;
+      }
+
+      const actionPayload = buildEmailActionPayload(match.mapping.ticketId, email);
+      const payload = await callHaloApiWithTicketContext(match.mapping, () =>
+        callHaloApiWithRefresh(record, {
+          body: [actionPayload],
+          method: "POST",
+          path: "/api/Actions",
+          phase: "email-send-auto-attach",
+          messagePrefix: "Halo sent email auto-attach failed",
+        })
+      );
+      const actionId = getCreatedActionId(payload);
+
+      markEmailSynced(match.mapping, email);
+
+      sendJson(res, 200, {
+        ok: true,
+        status: "attached",
+        ticketId: match.mapping.ticketId,
+        ticketNumber: match.mapping.ticketNumber,
+        message: `Sent email added to Halo ticket ${getMappingTicketLabel(match.mapping)}.`,
+        actionId: actionId || undefined,
+      });
+    } catch (error) {
+      sendJson(res, getErrorStatus(error, 502), {
+        ok: false,
+        status: "failed",
+        message: "Sent email auto-attach failed",
+        error: publicError(error),
+        debug: publicDebug(error),
+        ticketNumber: getErrorTicketNumber(error),
+      });
+    }
+  });
+
   app.post("/api/auth/logout", (req, res) => {
     const sessionId = getSessionIdFromRequest(req);
 
     if (sessionId) {
-      sessions.delete(hashSessionId(sessionId));
+      const sessionHash = hashSessionId(sessionId);
+      sessions.delete(sessionHash);
+      deleteBackgroundSessionsForSessionHash(sessionHash);
     }
 
     res.setHeader("Set-Cookie", clearSessionCookie());
@@ -498,10 +677,15 @@ function normalizeEmailPayload(value) {
     conversationId: stringifyField(value.conversationId),
     dateTimeCreated: normalizeIsoDate(value.dateTimeCreated),
     from: normalizeEmailAddress(value.from),
+    inReplyToMessageIds: normalizeMessageIdList(value.inReplyToMessageIds),
+    internetHeaders: stringifyField(value.internetHeaders),
     internetMessageId: stringifyField(value.internetMessageId),
     itemId: stringifyField(value.itemId),
+    mailboxEmail: normalizeMailboxEmail(value.mailboxEmail),
     normalizedSubject: stringifyField(value.normalizedSubject),
+    referenceMessageIds: normalizeMessageIdList(value.referenceMessageIds),
     subject: stringifyField(value.subject),
+    timeZone: normalizeTimeZone(value.timeZone),
     to: normalizeEmailAddressList(value.to),
   };
 
@@ -514,6 +698,265 @@ function normalizeEmailPayload(value) {
   }
 
   return email;
+}
+
+function normalizeSendEmailPayload(value) {
+  if (!value || typeof value !== "object") {
+    throw new RequestError("Email payload is required.", 400);
+  }
+
+  const email = {
+    bodyHtml: stringifyField(value.bodyHtml),
+    bodyText: stringifyField(value.bodyText),
+    cc: normalizeEmailAddressList(value.cc),
+    conversationId: stringifyField(value.conversationId),
+    dateTimeCreated: normalizeIsoDate(value.dateTimeCreated),
+    from: normalizeEmailAddress(value.from),
+    inReplyToMessageIds: normalizeMessageIdList(value.inReplyToMessageIds),
+    internetHeaders: stringifyField(value.internetHeaders),
+    internetMessageId: stringifyField(value.internetMessageId),
+    itemId: stringifyField(value.itemId),
+    mailboxEmail: normalizeMailboxEmail(value.mailboxEmail),
+    normalizedSubject: stringifyField(value.normalizedSubject),
+    referenceMessageIds: normalizeMessageIdList(value.referenceMessageIds),
+    subject: stringifyField(value.subject),
+    timeZone: normalizeTimeZone(value.timeZone),
+    to: normalizeEmailAddressList(value.to),
+  };
+
+  if (!email.bodyHtml && !email.bodyText) {
+    throw new RequestError("Could not read an email body to attach.", 400);
+  }
+
+  if (!email.inReplyToMessageIds.length && !email.conversationId) {
+    throw new RequestError("No mapped reply identifiers were available.", 400);
+  }
+
+  email.internetMessageId = email.internetMessageId || buildSyntheticMessageId(email);
+  return email;
+}
+
+function buildSyntheticMessageId(email) {
+  const stableKey = email.itemId ? hashStableValue(email.itemId) : buildOutgoingBodyHash(email);
+  return `<halo-outlook-${stableKey}@local>`;
+}
+
+function hashStableValue(value) {
+  return crypto.createHash("sha256").update(String(value)).digest("hex").slice(0, 32);
+}
+
+function buildOutgoingBodyHash(email) {
+  return crypto
+    .createHash("sha256")
+    .update(
+      JSON.stringify({
+        mailboxEmail: email.mailboxEmail,
+        conversationId: email.conversationId,
+        inReplyToMessageIds: email.inReplyToMessageIds,
+        subject: email.subject,
+        bodyHtml: email.bodyHtml,
+        bodyText: email.bodyText,
+      })
+    )
+    .digest("hex")
+    .slice(0, 32);
+}
+
+function normalizeMailboxEmail(value) {
+  return stringifyField(value).toLowerCase();
+}
+
+function normalizeTimeZone(value) {
+  const timeZone = stringifyField(value);
+
+  if (!timeZone) {
+    return "";
+  }
+
+  try {
+    Intl.DateTimeFormat("en-GB", { timeZone }).format(new Date());
+    return timeZone;
+  } catch {
+    return "";
+  }
+}
+
+function normalizeMessageIdList(value) {
+  if (!Array.isArray(value)) {
+    const singleValue = normalizeMessageId(value);
+    return singleValue ? [singleValue] : [];
+  }
+
+  const seen = new Set();
+  const messageIds = [];
+
+  value.forEach((entry) => {
+    const messageId = normalizeMessageId(entry);
+    const key = normalizeMessageIdKey(messageId);
+
+    if (messageId && key && !seen.has(key)) {
+      seen.add(key);
+      messageIds.push(messageId);
+    }
+  });
+
+  return messageIds;
+}
+
+function normalizeMessageId(value) {
+  return stringifyField(value);
+}
+
+function normalizeMessageIdKey(value) {
+  return normalizeMessageId(value).toLowerCase();
+}
+
+function storeConversationMapping({ email, includeThreadMessageIds = false, ticketId, ticketNumber }) {
+  const mailboxEmail = normalizeMailboxEmail(email.mailboxEmail);
+
+  if (!mailboxEmail || !email.internetMessageId) {
+    return null;
+  }
+
+  let mapping =
+    getMappingByMessageId(mailboxEmail, email.internetMessageId) ||
+    getMappingByConversationId(mailboxEmail, email.conversationId);
+  const now = Date.now();
+
+  if (!mapping) {
+    mapping = {
+      id: randomBase64Url(16),
+      mailboxEmail,
+      ticketId,
+      ticketNumber: ticketNumber || String(ticketId),
+      conversationId: email.conversationId || "",
+      normalizedSubject: email.normalizedSubject || "",
+      syncedMessageIds: new Set(),
+      createdAt: now,
+      updatedAt: now,
+    };
+    conversationMappings.set(mapping.id, mapping);
+  }
+
+  mapping.mailboxEmail = mailboxEmail;
+  mapping.ticketId = ticketId;
+  mapping.ticketNumber = ticketNumber || mapping.ticketNumber || String(ticketId);
+  mapping.conversationId = email.conversationId || mapping.conversationId || "";
+  mapping.normalizedSubject = email.normalizedSubject || mapping.normalizedSubject || "";
+  mapping.updatedAt = now;
+  markEmailSynced(mapping, email, { includeThreadMessageIds });
+
+  return mapping;
+}
+
+function markEmailSynced(mapping, email, options = {}) {
+  const mailboxEmail = normalizeMailboxEmail(mapping.mailboxEmail);
+  const messageIds = [email.internetMessageId];
+
+  if (options.includeThreadMessageIds) {
+    messageIds.push(...email.inReplyToMessageIds, ...email.referenceMessageIds);
+  }
+
+  messageIds.forEach((messageId) => {
+    const messageIdKey = normalizeMessageIdKey(messageId);
+    if (!messageIdKey) {
+      return;
+    }
+
+    mapping.syncedMessageIds.add(messageIdKey);
+    messageMappingsByKey.set(getMessageMappingKey(mailboxEmail, messageIdKey), mapping.id);
+  });
+
+  if (email.conversationId) {
+    mapping.conversationId = email.conversationId;
+    conversationMappingsByKey.set(
+      getConversationMappingKey(mailboxEmail, email.conversationId),
+      mapping.id
+    );
+  }
+
+  mapping.updatedAt = Date.now();
+}
+
+function findConversationMappingForEmail(email) {
+  const mailboxEmail = normalizeMailboxEmail(email.mailboxEmail);
+
+  if (!mailboxEmail) {
+    return null;
+  }
+
+  const existingMessageMapping = getMappingByMessageId(mailboxEmail, email.internetMessageId);
+  if (existingMessageMapping) {
+    return {
+      mapping: existingMessageMapping,
+      status: "already-attached",
+    };
+  }
+
+  const threadMessageIds = email.inReplyToMessageIds.concat(email.referenceMessageIds);
+  for (const messageId of threadMessageIds) {
+    const mapping = getMappingByMessageId(mailboxEmail, messageId);
+    if (mapping) {
+      return {
+        mapping,
+        status: "match",
+      };
+    }
+  }
+
+  const conversationMapping = getMappingByConversationId(mailboxEmail, email.conversationId);
+  if (conversationMapping) {
+    return {
+      mapping: conversationMapping,
+      status: "match",
+    };
+  }
+
+  return null;
+}
+
+function getMappingByMessageId(mailboxEmail, messageId) {
+  const messageIdKey = normalizeMessageIdKey(messageId);
+  if (!mailboxEmail || !messageIdKey) {
+    return null;
+  }
+
+  return conversationMappings.get(getMessageMappingId(mailboxEmail, messageIdKey)) || null;
+}
+
+function getMappingByConversationId(mailboxEmail, conversationId) {
+  if (!mailboxEmail || !conversationId) {
+    return null;
+  }
+
+  return conversationMappings.get(
+    conversationMappingsByKey.get(getConversationMappingKey(mailboxEmail, conversationId))
+  ) || null;
+}
+
+function getMessageMappingId(mailboxEmail, messageIdKey) {
+  return messageMappingsByKey.get(getMessageMappingKey(mailboxEmail, messageIdKey));
+}
+
+function getMessageMappingKey(mailboxEmail, messageIdKey) {
+  return `${mailboxEmail}|${messageIdKey}`;
+}
+
+function getConversationMappingKey(mailboxEmail, conversationId) {
+  return `${mailboxEmail}|${conversationId}`;
+}
+
+function getMappingTicketLabel(mapping) {
+  return mapping.ticketNumber || String(mapping.ticketId);
+}
+
+async function callHaloApiWithTicketContext(mapping, callback) {
+  try {
+    return await callback();
+  } catch (error) {
+    error.ticketNumber = getMappingTicketLabel(mapping);
+    throw error;
+  }
 }
 
 function normalizeEmailAddressList(value) {
@@ -557,11 +1000,13 @@ function normalizeIsoDate(value) {
   return Number.isNaN(date.getTime()) ? new Date().toISOString() : date.toISOString();
 }
 
-function buildEmailActionPayload(ticketId, email) {
-  const htmlBody = email.bodyHtml || textToHtml(email.bodyText);
+function buildEmailActionPayload(ticketId, email, options = {}) {
+  const body = getEmailBodyForAction(email, options.bodyMode || "trimmed");
+  const htmlBody = body.bodyHtml || textToHtml(body.bodyText);
   const noteHtml = buildEmailNoteHtml(email, htmlBody);
   const note = buildEmailNoteText(email);
   const subject = email.subject || email.normalizedSubject || "(no subject)";
+  const actionDatetime = getCurrentActionDateTime();
 
   return {
     ticket_id: ticketId,
@@ -574,33 +1019,48 @@ function buildEmailActionPayload(ticketId, email) {
     actioninternetmessageid: email.internetMessageId,
     emailtolistall: email.to.join("; "),
     whowith: email.from,
-    datetime: email.dateTimeCreated,
+    datetime: actionDatetime,
   };
+}
+
+function getEmailBodyForAction(email, bodyMode) {
+  if (bodyMode === "full") {
+    return {
+      bodyHtml: email.bodyHtml || "",
+      bodyText: email.bodyText || "",
+    };
+  }
+
+  return trimEmailBody(email);
+}
+
+function getCurrentActionDateTime() {
+  return new Date().toISOString();
 }
 
 function buildEmailNoteText(email) {
   const subject = email.subject || email.normalizedSubject || "(no subject)";
+  const emailDate = formatEmailDate(email.dateTimeCreated, email.timeZone);
   return [
     "Outlook email attached to ticket.",
     `From: ${email.from || "(unknown)"}`,
     `To: ${email.to.join("; ") || "(none)"}`,
     email.cc.length ? `Cc: ${email.cc.join("; ")}` : "",
     `Subject: ${subject}`,
-    `Date: ${email.dateTimeCreated}`,
-    `Internet Message ID: ${email.internetMessageId}`,
+    `Email date: ${emailDate}`,
   ]
     .filter(Boolean)
     .join("\n");
 }
 
 function buildEmailNoteHtml(email, htmlBody) {
+  const emailDate = formatEmailDate(email.dateTimeCreated, email.timeZone);
   const rows = [
     ["From", email.from || "(unknown)"],
     ["To", email.to.join("; ") || "(none)"],
     ["Cc", email.cc.join("; ")],
     ["Subject", email.subject || email.normalizedSubject || "(no subject)"],
-    ["Date", email.dateTimeCreated],
-    ["Internet Message ID", email.internetMessageId],
+    ["Email date", emailDate],
   ].filter((row) => row[1]);
 
   const metadataRows = rows
@@ -613,6 +1073,110 @@ function buildEmailNoteHtml(email, htmlBody) {
     .join("");
 
   return `<div><p><strong>Outlook email attached to ticket.</strong></p><table>${metadataRows}</table><hr>${htmlBody}</div>`;
+}
+
+function formatEmailDate(value, timeZone) {
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return stringifyField(value);
+  }
+
+  const formatOptions = {
+    day: "2-digit",
+    hour: "2-digit",
+    hour12: false,
+    minute: "2-digit",
+    month: "2-digit",
+    second: "2-digit",
+    timeZoneName: "short",
+    year: "numeric",
+  };
+
+  try {
+    const formatter = timeZone
+      ? new Intl.DateTimeFormat("en-GB", { ...formatOptions, timeZone })
+      : new Intl.DateTimeFormat("en-GB", formatOptions);
+    return formatter.format(date);
+  } catch {
+    return date.toISOString();
+  }
+}
+
+function trimEmailBody(email) {
+  const bodyHtml = email.bodyHtml ? trimQuotedHtml(email.bodyHtml) || email.bodyHtml : "";
+  const bodyText = email.bodyText ? trimQuotedText(email.bodyText) || email.bodyText : "";
+
+  return {
+    bodyHtml,
+    bodyText,
+  };
+}
+
+function trimQuotedHtml(value) {
+  const trimIndex = getFirstUsableIndex([
+    getPatternIndex(value, /<blockquote\b/i),
+    getPatternIndex(value, /<[^>]+\bclass=["'][^"']*(?:gmail_quote|moz-cite-prefix|yahoo_quoted)[^"']*["'][^>]*>/i),
+    getPatternIndex(value, /\bOn\s+[\s\S]{1,500}?\s+wrote:/i),
+    getOutlookHeaderIndex(value),
+  ]);
+
+  const trimmed = trimIndex >= 0 ? value.slice(0, trimIndex) : value;
+  return hasMeaningfulHtml(trimmed) ? trimmed.trim() : "";
+}
+
+function trimQuotedText(value) {
+  const trimIndex = getFirstUsableIndex([
+    getPatternIndex(value, /^On .+ wrote:$/im),
+    getPatternIndex(value, /^-{2,}\s*Original Message\s*-{2,}$/im),
+    getOutlookHeaderIndex(value),
+  ]);
+
+  const trimmed = trimIndex >= 0 ? value.slice(0, trimIndex) : value;
+  return trimmed.trim() ? trimmed.trim() : "";
+}
+
+function getFirstUsableIndex(indexes) {
+  return indexes.filter((index) => index >= 0).sort((left, right) => left - right)[0] ?? -1;
+}
+
+function getPatternIndex(value, pattern) {
+  const match = pattern.exec(value);
+  return match ? match.index : -1;
+}
+
+function getOutlookHeaderIndex(value) {
+  const match = /(?:^|[\r\n]|<[^>]+>)\s*(?:<b>|<strong>)?From:(?:<\/b>|<\/strong>)?/i.exec(
+    value
+  );
+
+  if (!match) {
+    return -1;
+  }
+
+  const headerBlock = value.slice(match.index, match.index + 1500);
+  if (
+    /(?:^|[\r\n]|<[^>]+>)\s*(?:<b>|<strong>)?Sent:/i.test(headerBlock) &&
+    /(?:^|[\r\n]|<[^>]+>)\s*(?:<b>|<strong>)?To:/i.test(headerBlock) &&
+    /(?:^|[\r\n]|<[^>]+>)\s*(?:<b>|<strong>)?Subject:/i.test(headerBlock)
+  ) {
+    return match.index;
+  }
+
+  return -1;
+}
+
+function hasMeaningfulHtml(value) {
+  return stripHtml(value).trim().length > 0;
+}
+
+function stripHtml(value) {
+  return String(value)
+    .replace(/<style\b[\s\S]*?<\/style>/gi, " ")
+    .replace(/<script\b[\s\S]*?<\/script>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/\s+/g, " ");
 }
 
 function textToHtml(value) {
@@ -975,7 +1539,10 @@ function decryptJson(value) {
 }
 
 function getSessionRecord(req) {
-  const sessionId = getSessionIdFromRequest(req);
+  return getSessionRecordBySessionId(getSessionIdFromRequest(req));
+}
+
+function getSessionRecordBySessionId(sessionId) {
   if (!sessionId) {
     return null;
   }
@@ -993,6 +1560,59 @@ function getSessionRecord(req) {
   }
 
   return record;
+}
+
+function createBackgroundSession(sessionHash, expiresAt) {
+  const backgroundSessionId = randomBase64Url(32);
+  backgroundSessions.set(hashBackgroundSessionId(backgroundSessionId), {
+    sessionHash,
+    expiresAt,
+  });
+
+  return backgroundSessionId;
+}
+
+function createBackgroundSessionForRequest(req) {
+  const sessionId = getSessionIdFromRequest(req);
+  const record = getSessionRecordBySessionId(sessionId);
+
+  if (!sessionId || !record) {
+    return "";
+  }
+
+  return createBackgroundSession(hashSessionId(sessionId), record.expiresAt);
+}
+
+function getBackgroundSessionRecord(backgroundSessionId) {
+  const backgroundSession = backgroundSessions.get(hashBackgroundSessionId(backgroundSessionId));
+
+  if (!backgroundSession) {
+    return null;
+  }
+
+  if (backgroundSession.expiresAt <= Date.now()) {
+    backgroundSessions.delete(hashBackgroundSessionId(backgroundSessionId));
+    return null;
+  }
+
+  const record = sessions.get(backgroundSession.sessionHash);
+  if (!record || record.expiresAt <= Date.now()) {
+    backgroundSessions.delete(hashBackgroundSessionId(backgroundSessionId));
+    if (record) {
+      sessions.delete(backgroundSession.sessionHash);
+    }
+    return null;
+  }
+
+  return record;
+}
+
+function deleteBackgroundSessionsForSessionHash(sessionHash) {
+  for (const [key, record] of backgroundSessions.entries()) {
+    if (record.sessionHash === sessionHash) {
+      backgroundSessions.delete(key);
+    }
+  }
 }
 
 function getSessionIdFromRequest(req) {
@@ -1028,6 +1648,10 @@ function hashSessionId(sessionId) {
   return crypto.createHash("sha256").update(sessionId).digest("hex");
 }
 
+function hashBackgroundSessionId(backgroundSessionId) {
+  return crypto.createHash("sha256").update(backgroundSessionId || "").digest("hex");
+}
+
 function randomBase64Url(byteLength) {
   return base64Url(crypto.randomBytes(byteLength));
 }
@@ -1045,6 +1669,7 @@ function cleanExpiredRecords() {
   deleteExpired(pendingStates, now);
   deleteExpired(handoffs, now);
   deleteExpired(sessions, now);
+  deleteExpired(backgroundSessions, now);
 }
 
 function deleteExpired(map, now) {
@@ -1081,6 +1706,10 @@ function publicDebug(error) {
 
 function getErrorStatus(error, fallbackStatus) {
   return error instanceof RequestError ? error.status : fallbackStatus;
+}
+
+function getErrorTicketNumber(error) {
+  return error && error.ticketNumber ? error.ticketNumber : "";
 }
 
 function safeResponseError(responseDetails) {

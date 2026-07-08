@@ -115,13 +115,29 @@ function createEmailPayload(overrides = {}) {
     conversationId: "conversation-id",
     dateTimeCreated: "2026-07-07T10:00:00.000Z",
     from: { displayName: "Sender User", emailAddress: "sender@example.com" },
+    inReplyToMessageIds: [],
+    internetHeaders: "",
     internetMessageId: "<message@example.com>",
     itemId: "outlook-item-id",
+    mailboxEmail: "support@example.com",
     normalizedSubject: "Example subject",
+    referenceMessageIds: [],
     subject: "RE: Example subject",
+    timeZone: "Europe/London",
     to: [{ displayName: "Support User", emailAddress: "support@example.com" }],
     ...overrides,
   };
+}
+
+function createSendPayload(overrides = {}) {
+  return createEmailPayload({
+    bodyHtml: "<p>Sent reply from Outlook</p>",
+    bodyText: "",
+    internetMessageId: "",
+    itemId: "outgoing-draft-id",
+    subject: "RE: Example subject",
+    ...overrides,
+  });
 }
 
 async function run() {
@@ -349,8 +365,26 @@ async function run() {
   assert.strictEqual(unauthenticatedAttach.statusCode, 401);
   assert.strictEqual(unauthenticatedAttach.body.ok, false);
 
+  const unauthenticatedAutoAttach = await invoke(app, "POST", "/api/halo/email/auto-attach", {
+    url: "/api/halo/email/auto-attach",
+    body: createEmailPayload(),
+  });
+  assert.strictEqual(unauthenticatedAutoAttach.statusCode, 401);
+  assert.strictEqual(unauthenticatedAutoAttach.body.ok, false);
+
+  const noSessionSendAutoAttach = await invoke(app, "POST", "/api/halo/email/send-auto-attach", {
+    url: "/api/halo/email/send-auto-attach",
+    body: createSendPayload(),
+  });
+  assert.strictEqual(noSessionSendAutoAttach.statusCode, 200);
+  assert.strictEqual(noSessionSendAutoAttach.body.ok, true);
+  assert.strictEqual(noSessionSendAutoAttach.body.status, "no-session");
+
   let attachTokenFetchCount = 0;
   let attachActionFetchCount = 0;
+  let failNextAutoAttach = true;
+  let failNextSentAutoAttach = true;
+  const attachActions = [];
 
   global.fetch = async (requestUrl, options = {}) => {
     const url = String(requestUrl);
@@ -370,15 +404,24 @@ async function run() {
       const actions = JSON.parse(options.body);
       assert(Array.isArray(actions));
       assert.strictEqual(actions.length, 1);
+      attachActions.push(actions[0]);
       assert.strictEqual(actions[0].ticket_id, 1001);
       assert.strictEqual(actions[0].outcome, "Email");
-      assert.strictEqual(actions[0].emailsubject, "RE: Example subject");
-      assert.strictEqual(actions[0].email_message_id, "<message@example.com>");
-      assert.strictEqual(actions[0].actioninternetmessageid, "<message@example.com>");
+      assert(Number.isFinite(Date.parse(actions[0].datetime)));
       assert.match(actions[0].note, /Outlook email attached to ticket/);
       assert.match(actions[0].note_html, /Sender User &lt;sender@example.com&gt;/);
-      assert.match(actions[0].note_html, /<p>Hello from Outlook<\/p>/);
-      return jsonResponse({ id: 9001 }, 201, "Created");
+
+      if (actions[0].email_message_id === "<failing-reply@example.com>" && failNextAutoAttach) {
+        failNextAutoAttach = false;
+        return jsonResponse({ message: "Temporary action failure" }, 403, "Forbidden");
+      }
+
+      if (/Fail sent reply/.test(actions[0].note_html) && failNextSentAutoAttach) {
+        failNextSentAutoAttach = false;
+        return jsonResponse({ message: "Temporary sent action failure" }, 403, "Forbidden");
+      }
+
+      return jsonResponse({ id: 9000 + attachActionFetchCount }, 201, "Created");
     }
 
     throw new Error(`Unexpected fetch URL: ${url}`);
@@ -390,15 +433,265 @@ async function run() {
       url: "/api/halo/tickets/1001/email",
       params: { ticketId: "1001" },
       cookie: attachCookie,
-      body: createEmailPayload(),
+      body: createEmailPayload({
+        bodyHtml:
+          "<p>Hello from Outlook</p><blockquote><p>Prior thread content should stay for first attach</p></blockquote>",
+        inReplyToMessageIds: ["<prior-reply@example.com>"],
+        referenceMessageIds: ["<original-message@example.com>", "<prior-reply@example.com>"],
+        ticketNumber: "T1001",
+      }),
     });
 
     assert.strictEqual(attach.statusCode, 200);
     assert.strictEqual(attach.body.ok, true);
-    assert.strictEqual(attach.body.message, "Email attached to Halo ticket");
+    assert.strictEqual(attach.body.attachMode, "full-chain");
+    assert.strictEqual(attach.body.message, "Full email chain attached to Halo ticket");
     assert.strictEqual(attach.body.actionId, "9001");
+    assert(attach.body.backgroundSessionId);
     assert.strictEqual(attachTokenFetchCount, 1);
     assert.strictEqual(attachActionFetchCount, 1);
+    assert.strictEqual(attachActions[0].emailsubject, "RE: Example subject");
+    assert.strictEqual(attachActions[0].email_message_id, "<message@example.com>");
+    assert.strictEqual(attachActions[0].actioninternetmessageid, "<message@example.com>");
+    assert.notStrictEqual(attachActions[0].datetime, "2026-07-07T10:00:00.000Z");
+    assert.match(attachActions[0].note_html, /<p>Hello from Outlook<\/p>/);
+    assert.match(attachActions[0].note_html, /Prior thread content should stay for first attach/);
+    assert.match(attachActions[0].note_html, /Email date/);
+    assert.match(attachActions[0].note_html, /07\/07\/2026, 11:00:00 BST/);
+    assert.doesNotMatch(attachActions[0].note_html, /Internet Message ID/);
+    assert.doesNotMatch(attachActions[0].note_html, /<message@example\.com>/);
+
+    const alreadyAttached = await invoke(app, "POST", "/api/halo/email/auto-attach", {
+      url: "/api/halo/email/auto-attach",
+      cookie: attachCookie,
+      body: createEmailPayload(),
+    });
+    assert.strictEqual(alreadyAttached.statusCode, 200);
+    assert.strictEqual(alreadyAttached.body.ok, true);
+    assert.strictEqual(alreadyAttached.body.status, "already-attached");
+    assert.strictEqual(alreadyAttached.body.ticketId, 1001);
+    assert.strictEqual(alreadyAttached.body.ticketNumber, "T1001");
+    assert.strictEqual(attachActionFetchCount, 1);
+
+    const initialReferenceAlreadyCovered = await invoke(app, "POST", "/api/halo/email/auto-attach", {
+      url: "/api/halo/email/auto-attach",
+      cookie: attachCookie,
+      body: createEmailPayload({
+        bodyHtml: "<p>Earlier email already covered by first full-chain attach</p>",
+        conversationId: "different-older-email-conversation-id",
+        internetMessageId: "<original-message@example.com>",
+        itemId: "original-message-item-id",
+      }),
+    });
+    assert.strictEqual(initialReferenceAlreadyCovered.statusCode, 200);
+    assert.strictEqual(initialReferenceAlreadyCovered.body.ok, true);
+    assert.strictEqual(initialReferenceAlreadyCovered.body.status, "already-attached");
+    assert.strictEqual(attachActionFetchCount, 1);
+
+    const inReplyToAttach = await invoke(app, "POST", "/api/halo/email/auto-attach", {
+      url: "/api/halo/email/auto-attach",
+      cookie: attachCookie,
+      body: createEmailPayload({
+        bodyHtml: "<p>New reply content</p><blockquote><p>Old thread content</p></blockquote>",
+        inReplyToMessageIds: ["<message@example.com>"],
+        internetMessageId: "<reply@example.com>",
+        itemId: "reply-item-id",
+      }),
+    });
+    assert.strictEqual(inReplyToAttach.statusCode, 200);
+    assert.strictEqual(inReplyToAttach.body.ok, true);
+    assert.strictEqual(inReplyToAttach.body.status, "attached");
+    assert.strictEqual(inReplyToAttach.body.ticketNumber, "T1001");
+    assert.strictEqual(inReplyToAttach.body.actionId, "9002");
+    assert.strictEqual(attachActionFetchCount, 2);
+    assert.strictEqual(attachActions[1].email_message_id, "<reply@example.com>");
+    assert.match(attachActions[1].note_html, /<p>New reply content<\/p>/);
+    assert.doesNotMatch(attachActions[1].note_html, /Old thread content/);
+
+    const referencesAttach = await invoke(app, "POST", "/api/halo/email/auto-attach", {
+      url: "/api/halo/email/auto-attach",
+      cookie: attachCookie,
+      body: createEmailPayload({
+        bodyHtml:
+          "<p>Reference reply content</p><div class=\"gmail_quote\"><p>Quoted history</p></div>",
+        internetMessageId: "<references-reply@example.com>",
+        itemId: "references-reply-item-id",
+        referenceMessageIds: ["<message@example.com>", "<reply@example.com>"],
+      }),
+    });
+    assert.strictEqual(referencesAttach.statusCode, 200);
+    assert.strictEqual(referencesAttach.body.ok, true);
+    assert.strictEqual(referencesAttach.body.status, "attached");
+    assert.strictEqual(attachActionFetchCount, 3);
+    assert.match(attachActions[2].note_html, /Reference reply content/);
+    assert.doesNotMatch(attachActions[2].note_html, /Quoted history/);
+
+    const conversationAttach = await invoke(app, "POST", "/api/halo/email/auto-attach", {
+      url: "/api/halo/email/auto-attach",
+      cookie: attachCookie,
+      body: createEmailPayload({
+        bodyHtml: "<p>Conversation match content</p>",
+        inReplyToMessageIds: [],
+        internetMessageId: "<conversation-reply@example.com>",
+        itemId: "conversation-reply-item-id",
+        referenceMessageIds: [],
+      }),
+    });
+    assert.strictEqual(conversationAttach.statusCode, 200);
+    assert.strictEqual(conversationAttach.body.ok, true);
+    assert.strictEqual(conversationAttach.body.status, "attached");
+    assert.strictEqual(attachActionFetchCount, 4);
+
+    const unrelated = await invoke(app, "POST", "/api/halo/email/auto-attach", {
+      url: "/api/halo/email/auto-attach",
+      cookie: attachCookie,
+      body: createEmailPayload({
+        conversationId: "unrelated-conversation-id",
+        internetMessageId: "<unrelated@example.com>",
+        itemId: "unrelated-item-id",
+      }),
+    });
+    assert.strictEqual(unrelated.statusCode, 200);
+    assert.strictEqual(unrelated.body.ok, true);
+    assert.strictEqual(unrelated.body.status, "no-match");
+    assert.strictEqual(attachActionFetchCount, 4);
+
+    const differentMailbox = await invoke(app, "POST", "/api/halo/email/auto-attach", {
+      url: "/api/halo/email/auto-attach",
+      cookie: attachCookie,
+      body: createEmailPayload({
+        inReplyToMessageIds: ["<message@example.com>"],
+        internetMessageId: "<other-mailbox-reply@example.com>",
+        itemId: "other-mailbox-reply-item-id",
+        mailboxEmail: "other@example.com",
+      }),
+    });
+    assert.strictEqual(differentMailbox.statusCode, 200);
+    assert.strictEqual(differentMailbox.body.ok, true);
+    assert.strictEqual(differentMailbox.body.status, "no-match");
+    assert.strictEqual(attachActionFetchCount, 4);
+
+    const failedAutoAttach = await invoke(app, "POST", "/api/halo/email/auto-attach", {
+      url: "/api/halo/email/auto-attach",
+      cookie: attachCookie,
+      body: createEmailPayload({
+        bodyHtml: "<p>Retry me later</p>",
+        inReplyToMessageIds: ["<message@example.com>"],
+        internetMessageId: "<failing-reply@example.com>",
+        itemId: "failing-reply-item-id",
+      }),
+    });
+    assert.strictEqual(failedAutoAttach.statusCode, 502);
+    assert.strictEqual(failedAutoAttach.body.ok, false);
+    assert.match(failedAutoAttach.body.error, /Temporary action failure/);
+    assert.strictEqual(failedAutoAttach.body.debug.phase, "email-auto-attach");
+    assert.strictEqual(attachActionFetchCount, 5);
+
+    const retryAutoAttach = await invoke(app, "POST", "/api/halo/email/auto-attach", {
+      url: "/api/halo/email/auto-attach",
+      cookie: attachCookie,
+      body: createEmailPayload({
+        bodyHtml: "<p>Retry me later</p>",
+        inReplyToMessageIds: ["<message@example.com>"],
+        internetMessageId: "<failing-reply@example.com>",
+        itemId: "failing-reply-item-id",
+      }),
+    });
+    assert.strictEqual(retryAutoAttach.statusCode, 200);
+    assert.strictEqual(retryAutoAttach.body.ok, true);
+    assert.strictEqual(retryAutoAttach.body.status, "attached");
+    assert.strictEqual(attachActionFetchCount, 6);
+
+    const sentInReplyToAttach = await invoke(app, "POST", "/api/halo/email/send-auto-attach", {
+      url: "/api/halo/email/send-auto-attach",
+      cookie: attachCookie,
+      body: createSendPayload({
+        bodyHtml: "<p>Sent reply from Outlook</p><blockquote>Old quoted content</blockquote>",
+        inReplyToMessageIds: ["<message@example.com>"],
+        itemId: "sent-draft-in-reply-to-id",
+      }),
+    });
+    assert.strictEqual(sentInReplyToAttach.statusCode, 200);
+    assert.strictEqual(sentInReplyToAttach.body.ok, true);
+    assert.strictEqual(sentInReplyToAttach.body.status, "attached");
+    assert.strictEqual(sentInReplyToAttach.body.ticketNumber, "T1001");
+    assert.strictEqual(attachActionFetchCount, 7);
+    assert.match(attachActions[6].email_message_id, /^<halo-outlook-[a-f0-9]{32}@local>$/);
+    assert.match(attachActions[6].note_html, /Sent reply from Outlook/);
+    assert.doesNotMatch(attachActions[6].note_html, /Old quoted content/);
+
+    const duplicateSentAttach = await invoke(app, "POST", "/api/halo/email/send-auto-attach", {
+      url: "/api/halo/email/send-auto-attach",
+      cookie: attachCookie,
+      body: createSendPayload({
+        bodyHtml: "<p>Sent reply from Outlook</p><blockquote>Old quoted content</blockquote>",
+        inReplyToMessageIds: ["<message@example.com>"],
+        itemId: "sent-draft-in-reply-to-id",
+      }),
+    });
+    assert.strictEqual(duplicateSentAttach.statusCode, 200);
+    assert.strictEqual(duplicateSentAttach.body.ok, true);
+    assert.strictEqual(duplicateSentAttach.body.status, "already-attached");
+    assert.strictEqual(attachActionFetchCount, 7);
+
+    const sentConversationAttach = await invoke(app, "POST", "/api/halo/email/send-auto-attach", {
+      url: "/api/halo/email/send-auto-attach",
+      body: createSendPayload({
+        backgroundSessionId: attach.body.backgroundSessionId,
+        bodyHtml: "<p>Sent conversation fallback</p>",
+        inReplyToMessageIds: [],
+        itemId: "sent-draft-conversation-id",
+      }),
+    });
+    assert.strictEqual(sentConversationAttach.statusCode, 200);
+    assert.strictEqual(sentConversationAttach.body.ok, true);
+    assert.strictEqual(sentConversationAttach.body.status, "attached");
+    assert.strictEqual(attachActionFetchCount, 8);
+
+    const unrelatedSent = await invoke(app, "POST", "/api/halo/email/send-auto-attach", {
+      url: "/api/halo/email/send-auto-attach",
+      cookie: attachCookie,
+      body: createSendPayload({
+        conversationId: "unrelated-sent-conversation-id",
+        inReplyToMessageIds: [],
+        itemId: "unrelated-sent-draft-id",
+      }),
+    });
+    assert.strictEqual(unrelatedSent.statusCode, 200);
+    assert.strictEqual(unrelatedSent.body.ok, true);
+    assert.strictEqual(unrelatedSent.body.status, "no-match");
+    assert.strictEqual(attachActionFetchCount, 8);
+
+    const failedSentAttach = await invoke(app, "POST", "/api/halo/email/send-auto-attach", {
+      url: "/api/halo/email/send-auto-attach",
+      cookie: attachCookie,
+      body: createSendPayload({
+        bodyHtml: "<p>Fail sent reply</p>",
+        inReplyToMessageIds: ["<message@example.com>"],
+        itemId: "failing-sent-draft-id",
+      }),
+    });
+    assert.strictEqual(failedSentAttach.statusCode, 502);
+    assert.strictEqual(failedSentAttach.body.ok, false);
+    assert.strictEqual(failedSentAttach.body.status, "failed");
+    assert.match(failedSentAttach.body.error, /Temporary sent action failure/);
+    assert.strictEqual(failedSentAttach.body.debug.phase, "email-send-auto-attach");
+    assert.strictEqual(failedSentAttach.body.ticketNumber, "T1001");
+    assert.strictEqual(attachActionFetchCount, 9);
+
+    const retrySentAttach = await invoke(app, "POST", "/api/halo/email/send-auto-attach", {
+      url: "/api/halo/email/send-auto-attach",
+      cookie: attachCookie,
+      body: createSendPayload({
+        bodyHtml: "<p>Fail sent reply</p>",
+        inReplyToMessageIds: ["<message@example.com>"],
+        itemId: "failing-sent-draft-id",
+      }),
+    });
+    assert.strictEqual(retrySentAttach.statusCode, 200);
+    assert.strictEqual(retrySentAttach.body.ok, true);
+    assert.strictEqual(retrySentAttach.body.status, "attached");
+    assert.strictEqual(attachActionFetchCount, 10);
 
     const invalidTicket = await invoke(app, "POST", "/api/halo/tickets/:ticketId/email", {
       url: "/api/halo/tickets/not-a-ticket/email",
