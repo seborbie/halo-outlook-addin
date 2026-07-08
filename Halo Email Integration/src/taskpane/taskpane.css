@@ -1,0 +1,270 @@
+html,
+body {
+  width: 100%;
+  min-height: 100%;
+  margin: 0;
+  padding: 0;
+  color: #1f2933;
+  background: #f7f9fb;
+}
+
+button,
+input {
+  font: inherit;
+}
+
+.ms-welcome__main {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 24px;
+  text-align: center;
+}
+
+.halo-auth {
+  box-sizing: border-box;
+  display: flex;
+  min-height: 100%;
+  flex-direction: column;
+  gap: 18px;
+  padding: 20px;
+}
+
+.halo-auth__header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.halo-auth__header img {
+  flex: 0 0 auto;
+}
+
+.halo-auth__header h1,
+.halo-auth__eyebrow,
+.halo-auth__status-message,
+.halo-auth__status-detail {
+  margin: 0;
+}
+
+.halo-auth__eyebrow {
+  color: #536471;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.halo-auth__panel,
+.halo-auth__status,
+.halo-auth__tickets {
+  border: 1px solid #d9e2ec;
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+}
+
+.halo-auth__panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px;
+}
+
+.halo-auth__label {
+  color: #334e68;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.halo-auth__input {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 38px;
+  border: 1px solid #bcccdc;
+  border-radius: 6px;
+  padding: 8px 10px;
+  color: #102a43;
+  background: #fff;
+}
+
+.halo-auth__input:focus {
+  border-color: #0078d4;
+  box-shadow: 0 0 0 2px rgba(0, 120, 212, 0.2);
+  outline: none;
+}
+
+.halo-auth__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.halo-auth__button {
+  min-height: 36px;
+  border: 1px solid #bcccdc;
+  border-radius: 6px;
+  padding: 7px 12px;
+  color: #102a43;
+  background: #fff;
+  cursor: pointer;
+}
+
+.halo-auth__button--primary {
+  border-color: #0078d4;
+  color: #fff;
+  background: #0078d4;
+}
+
+.halo-auth__button:disabled {
+  cursor: not-allowed;
+  opacity: 0.62;
+}
+
+.halo-auth__status {
+  padding: 14px 16px;
+}
+
+.halo-auth__status-message {
+  font-weight: 700;
+}
+
+.halo-auth__status-detail {
+  margin-top: 6px;
+  color: #52606d;
+  font-size: 13px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.halo-auth__debug {
+  box-sizing: border-box;
+  max-height: 180px;
+  margin: 10px 0 0;
+  overflow: auto;
+  border: 1px solid rgba(15, 23, 42, 0.16);
+  border-radius: 6px;
+  padding: 10px;
+  color: #102a43;
+  background: rgba(255, 255, 255, 0.72);
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 12px;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.halo-auth__status[data-state="success"] {
+  border-color: #8dd7b0;
+  background: #effcf6;
+}
+
+.halo-auth__status[data-state="failed"] {
+  border-color: #f2a6a6;
+  background: #fff5f5;
+}
+
+.halo-auth__status[data-state="loading"] {
+  border-color: #9ac4f8;
+  background: #f0f7ff;
+}
+
+.halo-auth__tickets {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+}
+
+.halo-auth__tickets[hidden] {
+  display: none;
+}
+
+.halo-auth__tickets-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.halo-auth__tickets-title,
+.halo-auth__tickets-empty {
+  margin: 0;
+}
+
+.halo-auth__tickets-title {
+  color: #102a43;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.halo-auth__icon-button {
+  min-height: 30px;
+  border: 1px solid #bcccdc;
+  border-radius: 6px;
+  padding: 5px 9px;
+  color: #102a43;
+  background: #fff;
+  cursor: pointer;
+}
+
+.halo-auth__icon-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.62;
+}
+
+.halo-auth__tickets-empty {
+  color: #52606d;
+  font-size: 13px;
+}
+
+.halo-auth__tickets-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.halo-auth__ticket {
+  box-sizing: border-box;
+  width: 100%;
+  border: 1px solid #d9e2ec;
+  border-radius: 6px;
+  padding: 10px;
+  color: #102a43;
+  background: #fff;
+  cursor: pointer;
+  text-align: left;
+}
+
+.halo-auth__ticket:hover,
+.halo-auth__ticket:focus {
+  border-color: #0078d4;
+  box-shadow: 0 0 0 2px rgba(0, 120, 212, 0.12);
+  outline: none;
+}
+
+.halo-auth__ticket:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+.halo-auth__ticket[data-selected="true"] {
+  border-color: #0078d4;
+  background: #f0f7ff;
+}
+
+.halo-auth__ticket-title {
+  display: block;
+  font-weight: 700;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+
+.halo-auth__ticket-meta {
+  display: block;
+  margin-top: 4px;
+  color: #52606d;
+  font-size: 12px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}

@@ -1,15 +1,25 @@
-# halo-outlook-addin
+# Halo Outlook Add-in
 
-To install dependencies:
+The Outlook add-in lives in `Halo Email Integration`.
 
-```bash
-bun install
+## Local Halo OAuth setup
+
+Register a Halo API application with the `Authorisation Code (Native Application)` authentication method and add this redirect URI:
+
+```text
+https://localhost:3000/auth/callback
 ```
 
-To run:
+Start the Office add-in dev server:
 
-```bash
-bun run index.ts
+```powershell
+cd ".\Halo Email Integration"
+npm run dev-server
 ```
 
-This project was created using `bun init` in bun v1.3.14. [Bun](https://bun.com) is a fast all-in-one JavaScript runtime.
+On first use, the task pane asks for:
+
+- Halo URL, for example `https://your-company.halopsa.com`
+- Halo API application client ID
+
+The client ID is public OAuth application metadata. The add-in does not ask for or use a client secret.

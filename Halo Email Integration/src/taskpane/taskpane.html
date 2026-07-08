@@ -1,0 +1,85 @@
+<!-- Copyright (c) Microsoft Corporation. All rights reserved. Licensed under the MIT License. -->
+<!-- This file shows how to design a first-run page that provides a welcome screen to the user about the features of the add-in. -->
+
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=Edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Halo Email Integration</title>
+
+    <!-- Office JavaScript API -->
+    <script type="text/javascript" src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
+
+    <!-- For more information on Fluent UI, visit https://developer.microsoft.com/fluentui#/. -->
+    <link rel="stylesheet" href="https://res-1.cdn.office.net/files/fabric-cdn-prod_20230815.002/office-ui-fabric-core/11.1.0/css/fabric.min.css"/>
+
+    <!-- Template styles -->
+    <link href="taskpane.css" rel="stylesheet" type="text/css" />
+</head>
+
+<body class="ms-font-m ms-Fabric">
+    <section id="sideload-msg" class="ms-welcome__main">
+        <h2 class="ms-font-xl">Please <a target="_blank" href="https://learn.microsoft.com/office/dev/add-ins/testing/test-debug-office-add-ins#sideload-an-office-add-in-for-testing">sideload</a> your add-in to see app body.</h2>
+    </section>
+    <main id="app-body" class="halo-auth" style="display: none;">
+        <header class="halo-auth__header">
+            <img width="52" height="52" src="../../assets/logo-filled.png" alt="Halo Email Integration" />
+            <div>
+                <p class="halo-auth__eyebrow">Halo PSA</p>
+                <h1 class="ms-font-xxl">Connect Halo</h1>
+            </div>
+        </header>
+
+        <section class="halo-auth__panel" aria-labelledby="halo-url-label">
+            <label id="halo-url-label" class="halo-auth__label" for="halo-url">Halo URL</label>
+            <input
+                id="halo-url"
+                class="halo-auth__input"
+                type="url"
+                inputmode="url"
+                placeholder="https://your-company.halopsa.com"
+                autocomplete="url"
+            />
+            <label id="halo-client-id-label" class="halo-auth__label" for="halo-client-id">Halo Client ID</label>
+            <input
+                id="halo-client-id"
+                class="halo-auth__input"
+                type="text"
+                placeholder="Paste the Halo API application client ID"
+                autocomplete="off"
+                spellcheck="false"
+            />
+
+            <div class="halo-auth__actions">
+                <button id="login-button" class="halo-auth__button halo-auth__button--primary" type="button">
+                    Login to Halo
+                </button>
+                <button id="logout-button" class="halo-auth__button" type="button" hidden>
+                    Logout
+                </button>
+            </div>
+        </section>
+
+        <section id="status-card" class="halo-auth__status" aria-live="polite">
+            <p id="status-message" class="halo-auth__status-message">Enter your Halo URL to start.</p>
+            <p id="status-detail" class="halo-auth__status-detail"></p>
+            <pre id="debug-detail" class="halo-auth__debug" hidden></pre>
+        </section>
+
+        <section id="tickets-panel" class="halo-auth__tickets" aria-labelledby="tickets-heading" hidden>
+            <div class="halo-auth__tickets-header">
+                <h2 id="tickets-heading" class="halo-auth__tickets-title">My open tickets</h2>
+                <button id="refresh-tickets-button" class="halo-auth__icon-button" type="button" aria-label="Refresh tickets">
+                    Refresh
+                </button>
+            </div>
+            <p id="tickets-empty" class="halo-auth__tickets-empty" hidden>No open tickets found.</p>
+            <div id="tickets-list" class="halo-auth__tickets-list"></div>
+        </section>
+    </main>
+</body>
+
+</html>
