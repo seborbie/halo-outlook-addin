@@ -1,9 +1,9 @@
-/* global Office, XMLHttpRequest, setTimeout, clearTimeout */
+/* global Office, XMLHttpRequest, setTimeout, clearTimeout, window */
 (function () {
   "use strict";
 
   var BACKGROUND_SESSION_STORAGE_KEY = "halo-auth-background-session-v1";
-  var SEND_AUTO_ATTACH_URL = "https://localhost:3000/api/halo/email/send-auto-attach";
+  var SEND_AUTO_ATTACH_URL = getOrigin() + "/api/halo/email/send-auto-attach";
   var SEND_AUTO_ATTACH_TIMEOUT_MS = 4500;
 
   function onHaloMessageSend(event) {
@@ -304,6 +304,14 @@
     }
 
     return "";
+  }
+
+  function getOrigin() {
+    if (window.location.origin) {
+      return window.location.origin;
+    }
+
+    return window.location.protocol + "//" + window.location.host;
   }
 
   function getClientTimeZone() {

@@ -7,6 +7,7 @@ dist
 build
 .svelte-kit
 *.tgz
+Halo Email Integration/data/
 
 # code coverage
 coverage

@@ -7,7 +7,9 @@ const path = require("path");
 const { registerHaloAuthRoutes } = require("./server/haloAuth");
 
 const urlDev = "https://localhost:3000/";
-const urlProd = urlDev;
+const urlProd = process.env.PUBLIC_BASE_URL
+  ? `${process.env.PUBLIC_BASE_URL.replace(/\/+$/, "")}/`
+  : urlDev;
 
 async function getHttpsOptions() {
   const httpsOptions = await devCerts.getHttpsServerOptions();

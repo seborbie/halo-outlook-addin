@@ -1,5 +1,33 @@
 const assert = require("assert");
+process.env.NODE_ENV = "test";
+process.env.HALO_TOKEN_ENCRYPTION_KEY = Buffer.alloc(32, 3).toString("base64url");
+
+const fs = require("fs");
+const crypto = require("crypto");
+const os = require("os");
+const path = require("path");
 const { registerHaloAuthRoutes } = require("./haloAuth");
+const { createHaloStore } = require("./haloStore");
+const { decodeEncryptionKey } = require("./tokenCrypto");
+
+const TEST_AUTH_HEADER = "Bearer test-microsoft-token";
+
+const microsoftAuthVerifier = {
+  async verify(token) {
+    if (token !== "test-microsoft-token") {
+      throw new Error("Invalid test Microsoft token.");
+    }
+
+    return {
+      aud: "test-addin-client-id",
+      email: "support@example.com",
+      name: "Support User",
+      oid: "test-object-id",
+      preferred_username: "support@example.com",
+      tid: "test-tenant-id",
+    };
+  },
+};
 
 function createMockApp() {
   const routes = {
@@ -19,11 +47,13 @@ function createMockApp() {
   };
 }
 
-function createMockReq({ url, body, cookie, params } = {}) {
+function createMockReq({ url, body, cookie, headers, params } = {}) {
   return {
     body,
     headers: {
       host: "localhost:3000",
+      authorization: TEST_AUTH_HEADER,
+      ...(headers || {}),
       ...(cookie ? { cookie } : {}),
     },
     originalUrl: url,
@@ -85,11 +115,40 @@ async function invoke(app, method, path, request = {}) {
   return response;
 }
 
+function registerTestRoutes(app, store = createHaloStore({ dbPath: ":memory:" })) {
+  registerHaloAuthRoutes(app, {
+    microsoftAuth: {
+      clientId: "test-addin-client-id",
+    },
+    microsoftAuthVerifier,
+    store,
+  });
+  return store;
+}
+
+function createTempDbPath(name) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "halo-auth-test-"));
+  return path.join(dir, `${name}.sqlite`);
+}
+
+function getCookieValue(cookieHeader, name) {
+  const part = String(cookieHeader || "")
+    .split(";")
+    .find((entry) => entry.trim().startsWith(`${name}=`));
+  return part ? decodeURIComponent(part.split("=")[1]) : "";
+}
+
+function sha256Hex(value) {
+  return crypto.createHash("sha256").update(value).digest("hex");
+}
+
 async function loginAndGetCookie(app) {
   const start = await invoke(app, "POST", "/api/auth/start", {
     url: "/api/auth/start",
+    headers: { authorization: TEST_AUTH_HEADER },
     body: { haloUrl: "https://customer.halopsa.com", clientId: "test-client-id" },
   });
+  assert.strictEqual(start.statusCode, 200, start.body && start.body.error);
   const dialogUrl = new URL(start.body.dialogUrl);
   const callback = await invoke(app, "GET", "/auth/callback", {
     url: `/auth/callback?code=test-code&state=${encodeURIComponent(
@@ -101,6 +160,7 @@ async function loginAndGetCookie(app) {
 
   const complete = await invoke(app, "POST", "/api/auth/complete", {
     url: "/api/auth/complete",
+    headers: { authorization: TEST_AUTH_HEADER },
     body: { handoffCode: handoffMatch[1] },
   });
   assert.strictEqual(complete.statusCode, 200);
@@ -141,8 +201,35 @@ function createSendPayload(overrides = {}) {
 }
 
 async function run() {
+  assert.throws(
+    () => decodeEncryptionKey("", { NODE_ENV: "production" }),
+    /HALO_TOKEN_ENCRYPTION_KEY/
+  );
+  assert.throws(
+    () => decodeEncryptionKey(Buffer.alloc(31, 1).toString("base64"), { NODE_ENV: "production" }),
+    /exactly 32 bytes/
+  );
+
+  const schemaStore = createHaloStore({ dbPath: ":memory:" });
+  const schemaUser = schemaStore.upsertUser({
+    objectId: "schema-object-id",
+    tenantId: "schema-tenant-id",
+  });
+  assert(schemaUser.id);
+  schemaStore.close();
+
+  const invalidAuthApp = createMockApp();
+  registerTestRoutes(invalidAuthApp);
+  const invalidAuthStatus = await invoke(invalidAuthApp, "GET", "/api/auth/status", {
+    url: "/api/auth/status",
+    headers: { authorization: "Bearer invalid-token" },
+  });
+  assert.strictEqual(invalidAuthStatus.statusCode, 401);
+  assert.strictEqual(invalidAuthStatus.body.authenticated, false);
+  assert.match(invalidAuthStatus.body.error, /Microsoft add-in authentication failed/);
+
   const app = createMockApp();
-  registerHaloAuthRoutes(app);
+  const store = registerTestRoutes(app);
 
   const missingClientId = await invoke(app, "POST", "/api/auth/start", {
     url: "/api/auth/start",
@@ -360,6 +447,7 @@ async function run() {
   const unauthenticatedAttach = await invoke(app, "POST", "/api/halo/tickets/:ticketId/email", {
     url: "/api/halo/tickets/1001/email",
     params: { ticketId: "1001" },
+    headers: { authorization: "" },
     body: createEmailPayload(),
   });
   assert.strictEqual(unauthenticatedAttach.statusCode, 401);
@@ -367,6 +455,7 @@ async function run() {
 
   const unauthenticatedAutoAttach = await invoke(app, "POST", "/api/halo/email/auto-attach", {
     url: "/api/halo/email/auto-attach",
+    headers: { authorization: "" },
     body: createEmailPayload(),
   });
   assert.strictEqual(unauthenticatedAutoAttach.statusCode, 401);
@@ -374,6 +463,7 @@ async function run() {
 
   const noSessionSendAutoAttach = await invoke(app, "POST", "/api/halo/email/send-auto-attach", {
     url: "/api/halo/email/send-auto-attach",
+    headers: { authorization: "" },
     body: createSendPayload(),
   });
   assert.strictEqual(noSessionSendAutoAttach.statusCode, 200);
@@ -648,6 +738,27 @@ async function run() {
     assert.strictEqual(sentConversationAttach.body.status, "attached");
     assert.strictEqual(attachActionFetchCount, 8);
 
+    const expiredBackgroundSessionId = "expired-background-session-id";
+    store.createBackgroundSession({
+      backgroundSessionHash: sha256Hex(expiredBackgroundSessionId),
+      sessionHash: sha256Hex(getCookieValue(attachCookie, "halo_session")),
+      expiresAt: Date.now() - 1000,
+    });
+    const expiredBackgroundAttach = await invoke(app, "POST", "/api/halo/email/send-auto-attach", {
+      url: "/api/halo/email/send-auto-attach",
+      headers: { authorization: "" },
+      body: createSendPayload({
+        backgroundSessionId: expiredBackgroundSessionId,
+        bodyHtml: "<p>Expired background handle</p>",
+        inReplyToMessageIds: ["<message@example.com>"],
+        itemId: "expired-background-draft-id",
+      }),
+    });
+    assert.strictEqual(expiredBackgroundAttach.statusCode, 200);
+    assert.strictEqual(expiredBackgroundAttach.body.ok, true);
+    assert.strictEqual(expiredBackgroundAttach.body.status, "no-session");
+    assert.strictEqual(attachActionFetchCount, 8);
+
     const unrelatedSent = await invoke(app, "POST", "/api/halo/email/send-auto-attach", {
       url: "/api/halo/email/send-auto-attach",
       cookie: attachCookie,
@@ -818,6 +929,129 @@ async function run() {
     assert.strictEqual(refreshActionFetchCount, 2);
   } finally {
     global.fetch = originalFetch;
+  }
+
+  let logoutTokenFetchCount = 0;
+  global.fetch = async (requestUrl) => {
+    const url = String(requestUrl);
+
+    if (url === "https://customer.halopsa.com/auth/token") {
+      logoutTokenFetchCount += 1;
+      return jsonResponse({
+        access_token: "logout-access-token",
+        expires_in: 3600,
+        refresh_token: "logout-refresh-token",
+      });
+    }
+
+    throw new Error(`Unexpected fetch URL: ${url}`);
+  };
+
+  try {
+    const logoutCookie = await loginAndGetCookie(app);
+    const logout = await invoke(app, "POST", "/api/auth/logout", {
+      url: "/api/auth/logout",
+      cookie: logoutCookie,
+    });
+    assert.strictEqual(logout.statusCode, 200);
+    assert.strictEqual(logout.body.authenticated, false);
+    assert.match(logout.headers["set-cookie"], /Max-Age=0/);
+
+    const postLogoutStatus = await invoke(app, "GET", "/api/auth/status", {
+      url: "/api/auth/status",
+    });
+    assert.strictEqual(postLogoutStatus.statusCode, 200);
+    assert.strictEqual(postLogoutStatus.body.authenticated, true);
+    assert.strictEqual(postLogoutStatus.body.haloUrl, "https://customer.halopsa.com");
+    assert(postLogoutStatus.body.backgroundSessionId);
+    assert.strictEqual(logoutTokenFetchCount, 1);
+  } finally {
+    global.fetch = originalFetch;
+  }
+
+  const persistentDbPath = createTempDbPath("persistent-auth");
+  const persistentStore = createHaloStore({ dbPath: persistentDbPath });
+  const persistentApp = createMockApp();
+  registerTestRoutes(persistentApp, persistentStore);
+
+  let persistentTokenFetchCount = 0;
+  let persistentActionFetchCount = 0;
+  global.fetch = async (requestUrl) => {
+    const url = String(requestUrl);
+
+    if (url === "https://customer.halopsa.com/auth/token") {
+      persistentTokenFetchCount += 1;
+      return jsonResponse({
+        access_token: "persistent-access-token",
+        expires_in: 3600,
+        refresh_token: "persistent-refresh-token",
+      });
+    }
+
+    if (url === "https://customer.halopsa.com/api/Actions") {
+      persistentActionFetchCount += 1;
+      return jsonResponse({ id: 9900 + persistentActionFetchCount }, 201, "Created");
+    }
+
+    throw new Error(`Unexpected fetch URL: ${url}`);
+  };
+
+  let persistentCookie;
+  try {
+    persistentCookie = await loginAndGetCookie(persistentApp);
+    const persistentAttach = await invoke(
+      persistentApp,
+      "POST",
+      "/api/halo/tickets/:ticketId/email",
+      {
+        url: "/api/halo/tickets/1001/email",
+        params: { ticketId: "1001" },
+        cookie: persistentCookie,
+        body: createEmailPayload({ ticketNumber: "T1001" }),
+      }
+    );
+
+    assert.strictEqual(persistentAttach.statusCode, 200);
+    assert.strictEqual(persistentAttach.body.ok, true);
+    assert.strictEqual(persistentTokenFetchCount, 1);
+    assert.strictEqual(persistentActionFetchCount, 1);
+  } finally {
+    global.fetch = originalFetch;
+    persistentStore.close();
+  }
+
+  const restartedStore = createHaloStore({ dbPath: persistentDbPath });
+  const restartedApp = createMockApp();
+  registerTestRoutes(restartedApp, restartedStore);
+
+  try {
+    const restartedStatus = await invoke(restartedApp, "GET", "/api/auth/status", {
+      url: "/api/auth/status",
+      cookie: persistentCookie,
+      headers: { authorization: "" },
+    });
+    assert.strictEqual(restartedStatus.statusCode, 200);
+    assert.strictEqual(restartedStatus.body.authenticated, true);
+    assert.strictEqual(restartedStatus.body.haloUrl, "https://customer.halopsa.com");
+    assert(restartedStatus.body.backgroundSessionId);
+
+    const restartedAlreadyAttached = await invoke(
+      restartedApp,
+      "POST",
+      "/api/halo/email/auto-attach",
+      {
+        url: "/api/halo/email/auto-attach",
+        cookie: persistentCookie,
+        headers: { authorization: "" },
+        body: createEmailPayload(),
+      }
+    );
+    assert.strictEqual(restartedAlreadyAttached.statusCode, 200);
+    assert.strictEqual(restartedAlreadyAttached.body.ok, true);
+    assert.strictEqual(restartedAlreadyAttached.body.status, "already-attached");
+    assert.strictEqual(restartedAlreadyAttached.body.ticketNumber, "T1001");
+  } finally {
+    restartedStore.close();
   }
 }
 

@@ -19,6 +19,7 @@
     "lint:fix": "office-addin-lint fix",
     "prettier": "office-addin-lint prettier",
     "prestart": "npm run build:dev",
+    "serve": "node server/index.js",
     "signin": "office-addin-dev-settings m365-account login",
     "signout": "office-addin-dev-settings m365-account logout",
     "start": "office-addin-debugging start manifest.xml",
@@ -28,7 +29,11 @@
     "watch": "webpack --mode development --watch"
   },
   "dependencies": {
+    "@azure/msal-browser": "^5.17.0",
+    "better-sqlite3": "^12.11.1",
     "core-js": "^3.36.0",
+    "express": "^5.2.1",
+    "jose": "^6.2.3",
     "regenerator-runtime": "^0.14.1"
   },
   "devDependencies": {

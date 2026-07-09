@@ -1,4 +1,7 @@
 const crypto = require("crypto");
+const { createHaloStore } = require("./haloStore");
+const { createMicrosoftAuthVerifier, getMicrosoftAuthConfig } = require("./microsoftAuth");
+const { createTokenCrypto } = require("./tokenCrypto");
 
 const SESSION_COOKIE = "halo_session";
 const AUTH_PATH = "/auth/authorize";
@@ -14,18 +17,24 @@ const MAX_EMAIL_JSON_BODY_BYTES = 2 * 1024 * 1024;
 
 const pendingStates = new Map();
 const handoffs = new Map();
-const sessions = new Map();
-const backgroundSessions = new Map();
-const conversationMappings = new Map();
-const conversationMappingsByKey = new Map();
-const messageMappingsByKey = new Map();
 
-const encryptionKey = crypto.randomBytes(32);
+let authStore = null;
+let tokenCrypto = null;
+let microsoftAuthVerifier = null;
+let microsoftAuthConfig = null;
 
-function registerHaloAuthRoutes(app) {
+function registerHaloAuthRoutes(app, options = {}) {
   if (app.locals && app.locals.haloAuthRoutesRegistered) {
     return;
   }
+
+  authStore = options.store || authStore || createHaloStore(options.storeOptions || {});
+  tokenCrypto = options.tokenCrypto || tokenCrypto || createTokenCrypto(options.env || process.env);
+  microsoftAuthVerifier =
+    options.microsoftAuthVerifier ||
+    microsoftAuthVerifier ||
+    createMicrosoftAuthVerifier(options.microsoftAuth || {});
+  microsoftAuthConfig = getMicrosoftAuthConfig(options.microsoftAuth || {});
 
   if (app.locals) {
     app.locals.haloAuthRoutesRegistered = true;
@@ -33,11 +42,16 @@ function registerHaloAuthRoutes(app) {
 
   setInterval(cleanExpiredRecords, 60 * 1000).unref();
 
+  app.get("/api/auth/config", (req, res) => {
+    sendJson(res, 200, microsoftAuthConfig);
+  });
+
   app.post("/api/auth/start", async (req, res) => {
     try {
       const body = await readJsonBody(req);
       const haloUrl = normalizeHaloUrl(body.haloUrl);
       const clientId = normalizeClientId(body.clientId);
+      const user = await requireMicrosoftUser(req);
       const state = randomBase64Url(32);
       const codeVerifier = randomBase64Url(64);
       const codeChallenge = base64Url(crypto.createHash("sha256").update(codeVerifier).digest());
@@ -49,6 +63,7 @@ function registerHaloAuthRoutes(app) {
         scope: DEFAULT_SCOPE,
         codeVerifier,
         codeChallenge,
+        userId: user.id,
         expiresAt: now + STATE_TTL_MS,
       });
 
@@ -56,7 +71,7 @@ function registerHaloAuthRoutes(app) {
         dialogUrl: `${getBaseUrl(req)}/auth/start?state=${encodeURIComponent(state)}`,
       });
     } catch (error) {
-      sendJson(res, 400, { error: publicError(error) });
+      sendJson(res, getErrorStatus(error, 400), { error: publicError(error) });
     }
   });
 
@@ -133,6 +148,7 @@ function registerHaloAuthRoutes(app) {
         clientId: pending.clientId,
         scope: pending.scope,
         encryptedToken,
+        userId: pending.userId,
         expiresAt: Date.now() + HANDOFF_TTL_MS,
       });
 
@@ -156,6 +172,7 @@ function registerHaloAuthRoutes(app) {
       const body = await readJsonBody(req);
       const handoffCode = typeof body.handoffCode === "string" ? body.handoffCode : "";
       const handoff = handoffs.get(handoffCode);
+      const user = await requireMicrosoftUser(req);
 
       if (!handoff || handoff.expiresAt <= Date.now()) {
         if (handoffCode) {
@@ -167,35 +184,43 @@ function registerHaloAuthRoutes(app) {
 
       handoffs.delete(handoffCode);
 
-      const sessionId = randomBase64Url(32);
-      const sessionHash = hashSessionId(sessionId);
-      const expiresAt = Date.now() + SESSION_TTL_MS;
-      const backgroundSessionId = createBackgroundSession(sessionHash, expiresAt);
+      if (handoff.userId !== user.id) {
+        sendJson(res, 403, { error: "The Halo login handoff belongs to a different Microsoft user." });
+        return;
+      }
 
-      sessions.set(sessionHash, {
+      const grant = authStore.saveHaloGrant({
+        userId: user.id,
         haloUrl: handoff.haloUrl,
         clientId: handoff.clientId,
         scope: handoff.scope,
         encryptedToken: handoff.encryptedToken,
-        expiresAt,
       });
+      const { backgroundSessionId, expiresAt } = createSessionForGrant(res, user.id, grant);
 
-      res.setHeader("Set-Cookie", serializeSessionCookie(sessionId, Math.floor(SESSION_TTL_MS / 1000)));
       sendJson(res, 200, {
         authenticated: true,
         backgroundSessionId,
         expiresAt: new Date(expiresAt).toISOString(),
       });
     } catch (error) {
-      sendJson(res, 400, { error: publicError(error) });
+      sendJson(res, getErrorStatus(error, 400), { error: publicError(error) });
     }
   });
 
-  app.post("/api/auth/background-session", (req, res) => {
-    const sessionId = getSessionIdFromRequest(req);
-    const record = getSessionRecordBySessionId(sessionId);
+  app.post("/api/auth/background-session", async (req, res) => {
+    let record;
+    try {
+      record = await getOrCreateSessionRecord(req, res);
+    } catch (error) {
+      sendJson(res, getErrorStatus(error, 401), {
+        ok: false,
+        error: publicError(error),
+      });
+      return;
+    }
 
-    if (!sessionId || !record) {
+    if (!record) {
       sendJson(res, 401, {
         ok: false,
         error: "No active Halo session.",
@@ -205,24 +230,33 @@ function registerHaloAuthRoutes(app) {
 
     sendJson(res, 200, {
       ok: true,
-      backgroundSessionId: createBackgroundSession(hashSessionId(sessionId), record.expiresAt),
+      backgroundSessionId: createBackgroundSession(record.sessionHash, record.expiresAt),
       expiresAt: new Date(record.expiresAt).toISOString(),
     });
   });
 
-  app.get("/api/auth/status", (req, res) => {
-    const record = getSessionRecord(req);
+  app.get("/api/auth/status", async (req, res) => {
+    try {
+      const record = await getOrCreateSessionRecord(req, res);
+      const body = {
+        authenticated: Boolean(record),
+        haloUrl: record ? record.haloUrl : null,
+        expiresAt: record ? new Date(record.expiresAt).toISOString() : null,
+      };
 
-    sendJson(res, 200, {
-      authenticated: Boolean(record),
-      haloUrl: record ? record.haloUrl : null,
-      expiresAt: record ? new Date(record.expiresAt).toISOString() : null,
-    });
+      if (record) {
+        body.backgroundSessionId = createBackgroundSession(record.sessionHash, record.expiresAt);
+      }
+
+      sendJson(res, 200, body);
+    } catch (error) {
+      sendJson(res, 401, { authenticated: false, error: publicError(error) });
+    }
   });
 
   app.get("/api/halo/ping", async (req, res) => {
     try {
-      const record = getSessionRecord(req);
+      const record = await getSessionOrBearerGrant(req);
 
       if (!record) {
         sendJson(res, 401, {
@@ -240,7 +274,7 @@ function registerHaloAuthRoutes(app) {
         message: "Halo API Auth works",
       });
     } catch (error) {
-      sendJson(res, 502, {
+      sendJson(res, getErrorStatus(error, 502), {
         ok: false,
         message: "Halo API Auth failed",
         error: publicError(error),
@@ -251,7 +285,7 @@ function registerHaloAuthRoutes(app) {
 
   app.get("/api/halo/tickets", async (req, res) => {
     try {
-      const record = getSessionRecord(req);
+      const record = await getSessionOrBearerGrant(req);
 
       if (!record) {
         sendJson(res, 401, {
@@ -276,7 +310,7 @@ function registerHaloAuthRoutes(app) {
         tickets,
       });
     } catch (error) {
-      sendJson(res, 502, {
+      sendJson(res, getErrorStatus(error, 502), {
         ok: false,
         message: "Halo ticket list failed",
         error: publicError(error),
@@ -287,7 +321,7 @@ function registerHaloAuthRoutes(app) {
 
   app.post("/api/halo/tickets/:ticketId/email", async (req, res) => {
     try {
-      const record = getSessionRecord(req);
+      const record = await getSessionOrBearerGrant(req);
 
       if (!record) {
         sendJson(res, 401, {
@@ -344,7 +378,7 @@ function registerHaloAuthRoutes(app) {
 
   app.post("/api/halo/email/auto-attach", async (req, res) => {
     try {
-      const record = getSessionRecord(req);
+      const record = await getSessionOrBearerGrant(req);
 
       if (!record) {
         sendJson(res, 401, {
@@ -411,7 +445,10 @@ function registerHaloAuthRoutes(app) {
   app.post("/api/halo/email/send-auto-attach", async (req, res) => {
     try {
       const body = await readJsonBody(req, MAX_EMAIL_JSON_BODY_BYTES);
-      const record = getSessionRecord(req) || getBackgroundSessionRecord(body.backgroundSessionId);
+      const record =
+        getSessionRecord(req) ||
+        getBackgroundSessionRecord(body.backgroundSessionId) ||
+        (await getBearerGrantRecord(req));
 
       if (!record) {
         sendJson(res, 200, {
@@ -477,13 +514,32 @@ function registerHaloAuthRoutes(app) {
     }
   });
 
-  app.post("/api/auth/logout", (req, res) => {
+  app.post("/api/auth/logout", async (req, res) => {
     const sessionId = getSessionIdFromRequest(req);
+    let userId = null;
 
     if (sessionId) {
       const sessionHash = hashSessionId(sessionId);
-      sessions.delete(sessionHash);
-      deleteBackgroundSessionsForSessionHash(sessionHash);
+      const record = getSessionRecordBySessionId(sessionId);
+      if (record) {
+        userId = record.userId;
+      } else {
+        authStore.deleteBackgroundSessionsForSessionHash(sessionHash);
+        authStore.deleteSession(sessionHash);
+      }
+    }
+
+    if (!userId) {
+      try {
+        const user = await getMicrosoftUserFromRequest(req);
+        userId = user ? user.id : null;
+      } catch {
+        userId = null;
+      }
+    }
+
+    if (userId) {
+      authStore.deleteSessionsForUser(userId);
     }
 
     res.setHeader("Set-Cookie", clearSessionCookie());
@@ -545,6 +601,9 @@ async function refreshAccessToken(record, currentTokenPayload) {
 
   const responseDetails = await readResponseDetails(response, requestUrl);
   if (!response.ok) {
+    if (record.grantId) {
+      authStore.invalidateGrantById(record.grantId);
+    }
     throw HttpError.fromResponse("Halo refresh token request failed", "token-refresh", responseDetails);
   }
 
@@ -555,6 +614,9 @@ async function refreshAccessToken(record, currentTokenPayload) {
   });
 
   record.encryptedToken = encryptJson(nextTokenPayload);
+  if (record.grantId) {
+    authStore.updateGrantToken(record.grantId, record.encryptedToken);
+  }
   return nextTokenPayload;
 }
 
@@ -835,7 +897,6 @@ function storeConversationMapping({ email, includeThreadMessageIds = false, tick
       createdAt: now,
       updatedAt: now,
     };
-    conversationMappings.set(mapping.id, mapping);
   }
 
   mapping.mailboxEmail = mailboxEmail;
@@ -844,6 +905,7 @@ function storeConversationMapping({ email, includeThreadMessageIds = false, tick
   mapping.conversationId = email.conversationId || mapping.conversationId || "";
   mapping.normalizedSubject = email.normalizedSubject || mapping.normalizedSubject || "";
   mapping.updatedAt = now;
+  authStore.saveConversationMapping(mapping);
   markEmailSynced(mapping, email, { includeThreadMessageIds });
 
   return mapping;
@@ -864,18 +926,20 @@ function markEmailSynced(mapping, email, options = {}) {
     }
 
     mapping.syncedMessageIds.add(messageIdKey);
-    messageMappingsByKey.set(getMessageMappingKey(mailboxEmail, messageIdKey), mapping.id);
+    authStore.saveMessageMapping({
+      mailboxEmail,
+      mappingId: mapping.id,
+      messageIdKey,
+    });
   });
 
   if (email.conversationId) {
     mapping.conversationId = email.conversationId;
-    conversationMappingsByKey.set(
-      getConversationMappingKey(mailboxEmail, email.conversationId),
-      mapping.id
-    );
+    authStore.saveConversationMapping(mapping);
   }
 
   mapping.updatedAt = Date.now();
+  authStore.saveConversationMapping(mapping);
 }
 
 function findConversationMappingForEmail(email) {
@@ -921,7 +985,7 @@ function getMappingByMessageId(mailboxEmail, messageId) {
     return null;
   }
 
-  return conversationMappings.get(getMessageMappingId(mailboxEmail, messageIdKey)) || null;
+  return authStore.getMappingByMessageId(mailboxEmail, messageIdKey);
 }
 
 function getMappingByConversationId(mailboxEmail, conversationId) {
@@ -929,21 +993,7 @@ function getMappingByConversationId(mailboxEmail, conversationId) {
     return null;
   }
 
-  return conversationMappings.get(
-    conversationMappingsByKey.get(getConversationMappingKey(mailboxEmail, conversationId))
-  ) || null;
-}
-
-function getMessageMappingId(mailboxEmail, messageIdKey) {
-  return messageMappingsByKey.get(getMessageMappingKey(mailboxEmail, messageIdKey));
-}
-
-function getMessageMappingKey(mailboxEmail, messageIdKey) {
-  return `${mailboxEmail}|${messageIdKey}`;
-}
-
-function getConversationMappingKey(mailboxEmail, conversationId) {
-  return `${mailboxEmail}|${conversationId}`;
+  return authStore.getMappingByConversationId(mailboxEmail, conversationId);
 }
 
 function getMappingTicketLabel(mapping) {
@@ -1490,6 +1540,10 @@ function getRequestUrl(req) {
 }
 
 function getBaseUrl(req) {
+  if (process.env.PUBLIC_BASE_URL) {
+    return process.env.PUBLIC_BASE_URL.replace(/\/+$/, "");
+  }
+
   const forwardedProto = req.headers["x-forwarded-proto"];
   const proto = Array.isArray(forwardedProto) ? forwardedProto[0] : forwardedProto;
   return `${proto || "https"}://${req.headers.host || "localhost:3000"}`;
@@ -1510,32 +1564,126 @@ function isTokenExpired(tokenPayload) {
   return Boolean(tokenPayload.expires_at && Date.now() > tokenPayload.expires_at - 30 * 1000);
 }
 
-function encryptJson(value) {
-  const iv = crypto.randomBytes(12);
-  const cipher = crypto.createCipheriv("aes-256-gcm", encryptionKey, iv);
-  const ciphertext = Buffer.concat([cipher.update(JSON.stringify(value), "utf8"), cipher.final()]);
+async function requireMicrosoftUser(req) {
+  const user = await getMicrosoftUserFromRequest(req);
+
+  if (!user) {
+    throw new RequestError("Microsoft add-in authentication is required.", 401);
+  }
+
+  return user;
+}
+
+async function getMicrosoftUserFromRequest(req) {
+  const token = getBearerToken(req);
+
+  if (!token) {
+    return null;
+  }
+
+  let claims;
+  try {
+    claims = await microsoftAuthVerifier.verify(token);
+  } catch (error) {
+    throw new RequestError(
+      `Microsoft add-in authentication failed: ${publicError(error)}`,
+      401
+    );
+  }
+
+  const tenantId = stringifyField(claims.tid);
+  const objectId = stringifyField(claims.oid || claims.sub);
+
+  if (!tenantId || !objectId) {
+    throw new RequestError("Microsoft add-in authentication did not include a stable user.", 401);
+  }
+
+  return authStore.upsertUser({
+    displayName: stringifyField(claims.name),
+    email: stringifyField(claims.preferred_username || claims.email || claims.upn),
+    objectId,
+    tenantId,
+  });
+}
+
+function getBearerToken(req) {
+  const header = req.headers.authorization || req.headers.Authorization || "";
+  const match = /^Bearer\s+(.+)$/i.exec(Array.isArray(header) ? header[0] : header);
+  return match ? match[1].trim() : "";
+}
+
+async function getOrCreateSessionRecord(req, res) {
+  const existingRecord = getSessionRecord(req);
+  if (existingRecord) {
+    return existingRecord;
+  }
+
+  const user = await getMicrosoftUserFromRequest(req);
+  if (!user) {
+    return null;
+  }
+
+  const grant = authStore.getGrantByUserId(user.id);
+  if (!grant) {
+    return null;
+  }
+
+  return createSessionForGrant(res, user.id, grant).record;
+}
+
+async function getSessionOrBearerGrant(req) {
+  return getSessionRecord(req) || (await getBearerGrantRecord(req));
+}
+
+async function getBearerGrantRecord(req) {
+  const user = await getMicrosoftUserFromRequest(req);
+  if (!user) {
+    return null;
+  }
+
+  const grant = authStore.getGrantByUserId(user.id);
+  if (!grant) {
+    return null;
+  }
 
   return {
-    iv: iv.toString("base64"),
-    ciphertext: ciphertext.toString("base64"),
-    tag: cipher.getAuthTag().toString("base64"),
+    ...grant,
+    expiresAt: Date.now() + SESSION_TTL_MS,
   };
 }
 
+function createSessionForGrant(res, userId, grant) {
+  const sessionId = randomBase64Url(32);
+  const sessionHash = hashSessionId(sessionId);
+  const expiresAt = Date.now() + SESSION_TTL_MS;
+
+  authStore.createSession({
+    expiresAt,
+    sessionHash,
+    userId,
+  });
+
+  res.setHeader("Set-Cookie", serializeSessionCookie(sessionId, Math.floor(SESSION_TTL_MS / 1000)));
+
+  return {
+    backgroundSessionId: createBackgroundSession(sessionHash, expiresAt),
+    expiresAt,
+    record: {
+      ...grant,
+      expiresAt,
+      sessionHash,
+      userId,
+    },
+    sessionId,
+  };
+}
+
+function encryptJson(value) {
+  return tokenCrypto.encryptJson(value);
+}
+
 function decryptJson(value) {
-  const decipher = crypto.createDecipheriv(
-    "aes-256-gcm",
-    encryptionKey,
-    Buffer.from(value.iv, "base64")
-  );
-  decipher.setAuthTag(Buffer.from(value.tag, "base64"));
-
-  const plaintext = Buffer.concat([
-    decipher.update(Buffer.from(value.ciphertext, "base64")),
-    decipher.final(),
-  ]).toString("utf8");
-
-  return JSON.parse(plaintext);
+  return tokenCrypto.decryptJson(value);
 }
 
 function getSessionRecord(req) {
@@ -1548,14 +1696,14 @@ function getSessionRecordBySessionId(sessionId) {
   }
 
   const sessionHash = hashSessionId(sessionId);
-  const record = sessions.get(sessionHash);
+  const record = authStore.getSessionWithGrant(sessionHash);
 
   if (!record) {
     return null;
   }
 
   if (record.expiresAt <= Date.now()) {
-    sessions.delete(sessionHash);
+    authStore.deleteSession(sessionHash);
     return null;
   }
 
@@ -1564,7 +1712,8 @@ function getSessionRecordBySessionId(sessionId) {
 
 function createBackgroundSession(sessionHash, expiresAt) {
   const backgroundSessionId = randomBase64Url(32);
-  backgroundSessions.set(hashBackgroundSessionId(backgroundSessionId), {
+  authStore.createBackgroundSession({
+    backgroundSessionHash: hashBackgroundSessionId(backgroundSessionId),
     sessionHash,
     expiresAt,
   });
@@ -1584,23 +1733,14 @@ function createBackgroundSessionForRequest(req) {
 }
 
 function getBackgroundSessionRecord(backgroundSessionId) {
-  const backgroundSession = backgroundSessions.get(hashBackgroundSessionId(backgroundSessionId));
-
-  if (!backgroundSession) {
-    return null;
-  }
-
-  if (backgroundSession.expiresAt <= Date.now()) {
-    backgroundSessions.delete(hashBackgroundSessionId(backgroundSessionId));
-    return null;
-  }
-
-  const record = sessions.get(backgroundSession.sessionHash);
-  if (!record || record.expiresAt <= Date.now()) {
-    backgroundSessions.delete(hashBackgroundSessionId(backgroundSessionId));
-    if (record) {
-      sessions.delete(backgroundSession.sessionHash);
-    }
+  const backgroundSessionHash = hashBackgroundSessionId(backgroundSessionId);
+  const record = authStore.getBackgroundSessionWithGrant(backgroundSessionHash);
+  if (
+    !record ||
+    record.expiresAt <= Date.now() ||
+    (record.backgroundExpiresAt && record.backgroundExpiresAt <= Date.now())
+  ) {
+    authStore.cleanExpired(Date.now());
     return null;
   }
 
@@ -1608,11 +1748,7 @@ function getBackgroundSessionRecord(backgroundSessionId) {
 }
 
 function deleteBackgroundSessionsForSessionHash(sessionHash) {
-  for (const [key, record] of backgroundSessions.entries()) {
-    if (record.sessionHash === sessionHash) {
-      backgroundSessions.delete(key);
-    }
-  }
+  authStore.deleteBackgroundSessionsForSessionHash(sessionHash);
 }
 
 function getSessionIdFromRequest(req) {
@@ -1668,8 +1804,9 @@ function cleanExpiredRecords() {
   const now = Date.now();
   deleteExpired(pendingStates, now);
   deleteExpired(handoffs, now);
-  deleteExpired(sessions, now);
-  deleteExpired(backgroundSessions, now);
+  if (authStore) {
+    authStore.cleanExpired(now);
+  }
 }
 
 function deleteExpired(map, now) {

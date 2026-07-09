@@ -1,7 +1,15 @@
 /* global document, Office, fetch, localStorage, RequestInit, HTMLInputElement, HTMLButtonElement, HTMLElement */
+import { createNestablePublicClientApplication, InteractionRequiredAuthError } from "@azure/msal-browser";
 
 const CONNECTION_STORAGE_KEY = "halo-auth-connection-v1";
 const BACKGROUND_SESSION_STORAGE_KEY = "halo-auth-background-session-v1";
+
+type AuthConfigResponse = {
+  authority: string;
+  clientId: string;
+  scopes: string[];
+  ssoEnabled: boolean;
+};
 
 type AuthStartResponse = {
   dialogUrl: string;
@@ -9,6 +17,7 @@ type AuthStartResponse = {
 
 type AuthStatusResponse = {
   authenticated: boolean;
+  backgroundSessionId?: string;
   haloUrl?: string;
   expiresAt?: string;
 };
@@ -109,6 +118,8 @@ type StoredConnection = {
 let currentDialog: Office.Dialog | null = null;
 let waitingForDialog = false;
 let checkingSession = false;
+let authConfigPromise: Promise<AuthConfigResponse> | null = null;
+let msalInstancePromise: Promise<unknown> | null = null;
 
 Office.onReady((info) => {
   if (info.host === Office.HostType.Outlook) {
@@ -147,13 +158,18 @@ async function checkExistingSession() {
   checkingSession = true;
 
   try {
-    const status = await fetchJson<AuthStatusResponse>("/api/auth/status");
+    const status = await fetchJson<AuthStatusResponse>(
+      "/api/auth/status",
+      {},
+      { allowMissingAuth: true, interactive: false }
+    );
 
     if (!status.authenticated) {
       setSignedOut();
       return;
     }
 
+    await saveBackgroundSessionId(status.backgroundSessionId || "");
     setBusy(true);
     setStatus("loading", "Checking Halo API auth...", status.haloUrl || "");
     await refreshBackgroundSessionId();
@@ -446,12 +462,18 @@ function registerItemChangedHandler() {
   mailbox.addHandlerAsync(Office.EventType.ItemChanged, () => void checkExistingSession());
 }
 
-async function fetchJson<T>(url: string, options: RequestInit = {}): Promise<T> {
+async function fetchJson<T>(
+  url: string,
+  options: RequestInit = {},
+  authOptions: { allowMissingAuth?: boolean; interactive?: boolean } = {}
+): Promise<T> {
+  const authHeader = await getMicrosoftAuthHeader(authOptions);
   const response = await fetch(url, {
     credentials: "same-origin",
     ...options,
     headers: {
       Accept: "application/json",
+      ...(authHeader ? { Authorization: authHeader } : {}),
       "Content-Type": "application/json",
       ...(options.headers || {}),
     },
@@ -467,6 +489,107 @@ async function fetchJson<T>(url: string, options: RequestInit = {}): Promise<T> 
   }
 
   return body as T;
+}
+
+async function getMicrosoftAuthHeader(options: {
+  allowMissingAuth?: boolean;
+  interactive?: boolean;
+} = {}): Promise<string> {
+  if (options.allowMissingAuth && !(await isSsoEnabled())) {
+    return "";
+  }
+
+  try {
+    const token = await acquireMicrosoftToken(options.interactive !== false);
+    return token ? `Bearer ${token}` : "";
+  } catch (error) {
+    if (options.allowMissingAuth) {
+      return "";
+    }
+
+    throw error;
+  }
+}
+
+async function isSsoEnabled(): Promise<boolean> {
+  const config = await getAuthConfig();
+  return config.ssoEnabled;
+}
+
+async function acquireMicrosoftToken(interactive: boolean): Promise<string> {
+  const config = await getAuthConfig();
+
+  if (!config.ssoEnabled || !config.clientId || !config.scopes.length) {
+    return "";
+  }
+
+  const msalInstance = (await getMsalInstance()) as {
+    acquireTokenPopup: (request: unknown) => Promise<{ accessToken?: string; idToken?: string }>;
+    ssoSilent: (request: unknown) => Promise<{ accessToken?: string; idToken?: string }>;
+  };
+  const request = {
+    scopes: config.scopes,
+    loginHint: await getLoginHint(),
+  };
+
+  try {
+    const result = await msalInstance.ssoSilent(request);
+    return result.idToken || result.accessToken || "";
+  } catch (error) {
+    if (!interactive || !(error instanceof InteractionRequiredAuthError)) {
+      throw error;
+    }
+
+    const result = await msalInstance.acquireTokenPopup(request);
+    return result.idToken || result.accessToken || "";
+  }
+}
+
+async function getMsalInstance(): Promise<unknown> {
+  if (msalInstancePromise) {
+    return msalInstancePromise;
+  }
+
+  msalInstancePromise = getAuthConfig().then((config) =>
+    createNestablePublicClientApplication({
+      auth: {
+        authority: config.authority,
+        clientId: config.clientId,
+      },
+      cache: {
+        cacheLocation: "localStorage",
+      },
+    })
+  );
+
+  return msalInstancePromise;
+}
+
+async function getAuthConfig(): Promise<AuthConfigResponse> {
+  if (!authConfigPromise) {
+    authConfigPromise = fetch("/api/auth/config", {
+      credentials: "same-origin",
+      headers: {
+        Accept: "application/json",
+      },
+    }).then((response) => response.json());
+  }
+
+  return authConfigPromise;
+}
+
+async function getLoginHint(): Promise<string | undefined> {
+  try {
+    const officeAuth = (Office as unknown as {
+      auth?: {
+        getAuthContext?: () => Promise<{ userPrincipalName?: string }>;
+      };
+    }).auth;
+    const authContext = officeAuth && officeAuth.getAuthContext ? await officeAuth.getAuthContext() : null;
+    return authContext && authContext.userPrincipalName ? authContext.userPrincipalName : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function setSignedOut() {

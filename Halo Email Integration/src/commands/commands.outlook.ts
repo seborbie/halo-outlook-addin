@@ -1,7 +1,7 @@
-/* global Office, fetch, setTimeout, clearTimeout, RequestInit, Response */
+/* global Office, fetch, setTimeout, clearTimeout, RequestInit, Response, window */
 
 const BACKGROUND_SESSION_STORAGE_KEY = "halo-auth-background-session-v1";
-const SEND_AUTO_ATTACH_URL = "https://localhost:3000/api/halo/email/send-auto-attach";
+const SEND_AUTO_ATTACH_URL = `${window.location.origin}/api/halo/email/send-auto-attach`;
 const SEND_AUTO_ATTACH_TIMEOUT_MS = 4500;
 
 type EmailAddressPayload = {
