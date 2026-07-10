@@ -1156,6 +1156,7 @@ function buildEmailActionPayload(ticketId, email, options = {}) {
   return {
     ticket_id: ticketId,
     outcome: "Email",
+    sendemail: false,
     note,
     note_html: noteHtml,
     emailbody_html: noteHtml,

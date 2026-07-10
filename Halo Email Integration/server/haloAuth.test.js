@@ -571,6 +571,7 @@ async function run() {
       attachActions.push(actions[0]);
       assert.strictEqual(actions[0].ticket_id, 1001);
       assert.strictEqual(actions[0].outcome, "Email");
+      assert.strictEqual(actions[0].sendemail, false);
       assert(Number.isFinite(Date.parse(actions[0].datetime)));
       assert.match(actions[0].note, /Outlook email attached to ticket/);
       assert.match(actions[0].note_html, /Sender User &lt;sender@example.com&gt;/);

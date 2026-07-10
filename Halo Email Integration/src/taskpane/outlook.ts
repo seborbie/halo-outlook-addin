@@ -1,4 +1,4 @@
-/* global document, Office, fetch, RequestInit, HTMLInputElement, HTMLButtonElement, HTMLFormElement, HTMLElement, SVGElement */
+/* global document, Office, fetch, RequestInit, Response, HTMLInputElement, HTMLButtonElement, HTMLFormElement, HTMLElement, SVGElement */
 import {
   createNestablePublicClientApplication,
   InteractionRequiredAuthError,
@@ -507,19 +507,15 @@ async function fetchJson<T>(
   options: RequestInit = {},
   authOptions: { allowMissingAuth?: boolean; interactive?: boolean } = {}
 ): Promise<T> {
-  const authHeader = await getMicrosoftAuthHeader(authOptions);
-  const response = await fetch(url, {
-    credentials: "same-origin",
-    ...options,
-    headers: {
-      Accept: "application/json",
-      ...(authHeader ? { Authorization: authHeader } : {}),
-      "Content-Type": "application/json",
-      ...(options.headers || {}),
-    },
-  });
+  let authHeader = await getMicrosoftAuthHeader(authOptions);
+  let response = await sendJsonRequest(url, options, authHeader);
+  let body = await response.json().catch(() => ({}));
 
-  const body = await response.json().catch(() => ({}));
+  if (shouldRefreshMicrosoftToken(response.status, body)) {
+    authHeader = await getMicrosoftAuthHeader({ ...authOptions, forceRefresh: true });
+    response = await sendJsonRequest(url, options, authHeader);
+    body = await response.json().catch(() => ({}));
+  }
 
   if (!response.ok) {
     throw createHaloAuthError(
@@ -531,9 +527,32 @@ async function fetchJson<T>(
   return body as T;
 }
 
+function sendJsonRequest(url: string, options: RequestInit, authHeader: string): Promise<Response> {
+  return fetch(url, {
+    credentials: "same-origin",
+    ...options,
+    headers: {
+      Accept: "application/json",
+      ...(authHeader ? { Authorization: authHeader } : {}),
+      "Content-Type": "application/json",
+      ...(options.headers || {}),
+    },
+  });
+}
+
+function shouldRefreshMicrosoftToken(status: number, body: unknown): boolean {
+  const error =
+    body && typeof body === "object" && "error" in body
+      ? String((body as { error?: unknown }).error || "")
+      : "";
+
+  return status === 401 && /Microsoft add-in authentication failed/i.test(error);
+}
+
 async function getMicrosoftAuthHeader(
   options: {
     allowMissingAuth?: boolean;
+    forceRefresh?: boolean;
     interactive?: boolean;
   } = {}
 ): Promise<string> {
@@ -542,7 +561,10 @@ async function getMicrosoftAuthHeader(
   }
 
   try {
-    const token = await acquireMicrosoftToken(options.interactive !== false);
+    const token = await acquireMicrosoftToken(
+      options.interactive !== false,
+      options.forceRefresh === true
+    );
     return token ? `Bearer ${token}` : "";
   } catch (error) {
     if (options.allowMissingAuth) {
@@ -558,7 +580,7 @@ async function isSsoEnabled(): Promise<boolean> {
   return config.ssoEnabled;
 }
 
-async function acquireMicrosoftToken(interactive: boolean): Promise<string> {
+async function acquireMicrosoftToken(interactive: boolean, forceRefresh = false): Promise<string> {
   const config = await getAuthConfig();
 
   if (!config.ssoEnabled || !config.clientId || !config.scopes.length) {
@@ -570,6 +592,7 @@ async function acquireMicrosoftToken(interactive: boolean): Promise<string> {
     ssoSilent: (request: unknown) => Promise<{ accessToken?: string; idToken?: string }>;
   };
   const request = {
+    forceRefresh,
     scopes: config.scopes,
     loginHint: await getLoginHint(),
   };
