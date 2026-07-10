@@ -2,6 +2,8 @@
 
 The Outlook add-in lives in `Halo Email Integration`. It runs as an Office task pane locally, and can also be built and served by the production Node server for an Azure container deployment.
 
+Current release: `v2026.7.10B` (Beta).
+
 ## Required Environment
 
 Use `.env.example` as the template for the required values. The app does not load `.env` files by itself, so either export these values in your shell, use a dotenv loader in your local workflow, or configure them as Azure app/container environment variables.

@@ -1,6 +1,6 @@
 {
   "name": "office-addin-taskpane",
-  "version": "0.0.1",
+  "version": "2026.7.10-beta",
   "repository": {
     "type": "git",
     "url": "https://github.com/OfficeDev/Office-Addin-TaskPane.git"
@@ -32,6 +32,7 @@
     "@azure/msal-browser": "^5.17.0",
     "better-sqlite3": "^12.11.1",
     "core-js": "^3.36.0",
+    "dotenv": "^8.6.0",
     "express": "^5.2.1",
     "jose": "^6.2.3",
     "regenerator-runtime": "^0.14.1"

@@ -263,7 +263,10 @@ async function run() {
   assert.strictEqual(haloAuthUrl.pathname, "/auth/authorize");
   assert.strictEqual(haloAuthUrl.searchParams.get("response_type"), "code");
   assert.strictEqual(haloAuthUrl.searchParams.get("client_id"), "test-client-id");
-  assert.strictEqual(haloAuthUrl.searchParams.get("redirect_uri"), "https://localhost:3000/auth/callback");
+  assert.strictEqual(
+    haloAuthUrl.searchParams.get("redirect_uri"),
+    "https://localhost:3000/auth/callback"
+  );
   assert.strictEqual(haloAuthUrl.searchParams.get("scope"), "all");
   assert.strictEqual(haloAuthUrl.searchParams.get("code_challenge_method"), "S256");
   assert(haloAuthUrl.searchParams.get("code_challenge"));
@@ -334,7 +337,10 @@ async function run() {
     assert.match(ping.body.error, /Tickets permission missing/);
     assert.strictEqual(ping.body.debug.phase, "api-test");
     assert.strictEqual(ping.body.debug.status, 403);
-    assert.strictEqual(ping.body.debug.endpoint, "https://customer.halopsa.com/api/Tickets?count=1");
+    assert.strictEqual(
+      ping.body.debug.endpoint,
+      "https://customer.halopsa.com/api/Tickets?count=1"
+    );
     assert.strictEqual(ping.body.debug.bodyExcerpt, '{"message":"Tickets permission missing"}');
     assert.strictEqual(ping.body.debug.requestedScope, "all");
   } finally {
@@ -343,6 +349,7 @@ async function run() {
 
   let ticketTokenFetchCount = 0;
   let ticketListFetchCount = 0;
+  let ticketSearchFetchCount = 0;
 
   global.fetch = async (requestUrl, options = {}) => {
     const url = String(requestUrl);
@@ -387,6 +394,32 @@ async function run() {
             summary: "Second open mine ticket",
             status: "Open",
             agent_id: 456,
+          },
+        ],
+      });
+    }
+
+    if (
+      url ===
+      "https://customer.halopsa.com/api/Tickets?count=20&search=2200&includeagent=true&includestatus=true"
+    ) {
+      ticketSearchFetchCount += 1;
+      return jsonResponse({
+        tickets: [
+          {
+            id: 2200,
+            ticketnumber: "0002200",
+            summary: "Closed ticket assigned to another agent",
+            status: "Closed",
+            agent_id: 999,
+            client_name: "Another Customer",
+            agent_name: "Another Agent",
+          },
+          {
+            id: 7777,
+            ticketnumber: "0007777",
+            summary: "Reference to 2200 in the summary",
+            status: "Open",
           },
         ],
       });
@@ -440,6 +473,34 @@ async function run() {
         agent: "",
       },
     ]);
+
+    const ticketSearch = await invoke(app, "GET", "/api/halo/tickets/search", {
+      url: "/api/halo/tickets/search?ticketNumber=%5BID%3A%202200%5D",
+      cookie: ticketsComplete.headers["set-cookie"],
+    });
+
+    assert.strictEqual(ticketSearch.statusCode, 200);
+    assert.strictEqual(ticketSearch.body.ok, true);
+    assert.strictEqual(ticketSearchFetchCount, 1);
+    assert.deepStrictEqual(ticketSearch.body.tickets, [
+      {
+        id: "2200",
+        ticketNumber: "0002200",
+        summary: "Closed ticket assigned to another agent",
+        status: "Closed",
+        client: "Another Customer",
+        agent: "Another Agent",
+      },
+    ]);
+
+    const emptyTicketSearch = await invoke(app, "GET", "/api/halo/tickets/search", {
+      url: "/api/halo/tickets/search?ticketNumber=",
+      cookie: ticketsComplete.headers["set-cookie"],
+    });
+
+    assert.strictEqual(emptyTicketSearch.statusCode, 400);
+    assert.strictEqual(emptyTicketSearch.body.ok, false);
+    assert.match(emptyTicketSearch.body.error, /ticket number/i);
   } finally {
     global.fetch = originalFetch;
   }
@@ -563,16 +624,21 @@ async function run() {
     assert.strictEqual(alreadyAttached.body.ticketNumber, "T1001");
     assert.strictEqual(attachActionFetchCount, 1);
 
-    const initialReferenceAlreadyCovered = await invoke(app, "POST", "/api/halo/email/auto-attach", {
-      url: "/api/halo/email/auto-attach",
-      cookie: attachCookie,
-      body: createEmailPayload({
-        bodyHtml: "<p>Earlier email already covered by first full-chain attach</p>",
-        conversationId: "different-older-email-conversation-id",
-        internetMessageId: "<original-message@example.com>",
-        itemId: "original-message-item-id",
-      }),
-    });
+    const initialReferenceAlreadyCovered = await invoke(
+      app,
+      "POST",
+      "/api/halo/email/auto-attach",
+      {
+        url: "/api/halo/email/auto-attach",
+        cookie: attachCookie,
+        body: createEmailPayload({
+          bodyHtml: "<p>Earlier email already covered by first full-chain attach</p>",
+          conversationId: "different-older-email-conversation-id",
+          internetMessageId: "<original-message@example.com>",
+          itemId: "original-message-item-id",
+        }),
+      }
+    );
     assert.strictEqual(initialReferenceAlreadyCovered.statusCode, 200);
     assert.strictEqual(initialReferenceAlreadyCovered.body.ok, true);
     assert.strictEqual(initialReferenceAlreadyCovered.body.status, "already-attached");
@@ -603,7 +669,7 @@ async function run() {
       cookie: attachCookie,
       body: createEmailPayload({
         bodyHtml:
-          "<p>Reference reply content</p><div class=\"gmail_quote\"><p>Quoted history</p></div>",
+          '<p>Reference reply content</p><div class="gmail_quote"><p>Quoted history</p></div>',
         internetMessageId: "<references-reply@example.com>",
         itemId: "references-reply-item-id",
         referenceMessageIds: ["<message@example.com>", "<reply@example.com>"],

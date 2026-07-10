@@ -1,5 +1,8 @@
-/* global document, Office, fetch, localStorage, RequestInit, HTMLInputElement, HTMLButtonElement, HTMLElement */
-import { createNestablePublicClientApplication, InteractionRequiredAuthError } from "@azure/msal-browser";
+/* global document, Office, fetch, localStorage, RequestInit, HTMLInputElement, HTMLButtonElement, HTMLFormElement, HTMLElement, SVGElement */
+import {
+  createNestablePublicClientApplication,
+  InteractionRequiredAuthError,
+} from "@azure/msal-browser";
 
 const CONNECTION_STORAGE_KEY = "halo-auth-connection-v1";
 const BACKGROUND_SESSION_STORAGE_KEY = "halo-auth-background-session-v1";
@@ -147,6 +150,11 @@ function bindControls() {
   getLoginButton().onclick = startHaloLogin;
   getLogoutButton().onclick = logout;
   getRefreshTicketsButton().onclick = () => void loadTickets();
+  getTicketSearchForm().onsubmit = (event) => {
+    event.preventDefault();
+    void searchTickets();
+  };
+  getClearSearchButton().onclick = clearSearchResults;
   registerItemChangedHandler();
 }
 
@@ -322,8 +330,8 @@ async function pingHalo() {
     throw createHaloAuthError(result.error || result.message, result.debug);
   }
 
-  getLogoutButton().hidden = false;
-  setStatus("success", "Halo API Auth works", "The access token was accepted by the Halo API.");
+  setConnectionState(true);
+  setStatus("success", "Connected to HaloPSA", "Choose a ticket to attach the open email.");
 }
 
 async function loadTickets() {
@@ -353,6 +361,60 @@ async function loadTickets() {
     setFailed(error, { hideLogout: false });
   } finally {
     setTicketsBusy(false);
+  }
+}
+
+async function searchTickets() {
+  const ticketNumber = getTicketNumberInput().value.trim();
+
+  if (!ticketNumber) {
+    setStatus(
+      "failed",
+      "Enter a ticket number",
+      "Type a HaloPSA ticket number, then select Search."
+    );
+    getTicketNumberInput().focus();
+    return;
+  }
+
+  const searchResults = getSearchResults();
+  searchResults.hidden = false;
+  getSearchEmpty().hidden = true;
+  clearSearchList();
+
+  try {
+    setSearchBusy(true);
+    setStatus(
+      "loading",
+      `Searching for ticket ${ticketNumber}...`,
+      "Searching all tickets you can access in HaloPSA."
+    );
+
+    const result = await fetchJson<HaloTicketsResponse>(
+      `/api/halo/tickets/search?ticketNumber=${encodeURIComponent(ticketNumber)}`
+    );
+
+    if (!result.ok) {
+      throw createHaloAuthError(
+        result.error || result.message || "Halo ticket search failed.",
+        result.debug
+      );
+    }
+
+    renderSearchResults(result.tickets || []);
+    if (result.tickets.length) {
+      setStatus(
+        "success",
+        result.tickets.length === 1 ? "Ticket found" : `${result.tickets.length} tickets found`,
+        "Select a ticket below to attach the open email."
+      );
+    } else {
+      setStatus("signed-out", "No matching ticket found", "Check the ticket number and try again.");
+    }
+  } catch (error) {
+    setFailed(error, { hideLogout: false, message: "Ticket search failed" });
+  } finally {
+    setSearchBusy(false);
   }
 }
 
@@ -393,7 +455,7 @@ async function autoAttachCurrentEmail(): Promise<boolean> {
     }
 
     clearTickets();
-    getLogoutButton().hidden = false;
+    setConnectionState(true);
 
     if (result.status === "already-attached") {
       setStatus(
@@ -491,10 +553,12 @@ async function fetchJson<T>(
   return body as T;
 }
 
-async function getMicrosoftAuthHeader(options: {
-  allowMissingAuth?: boolean;
-  interactive?: boolean;
-} = {}): Promise<string> {
+async function getMicrosoftAuthHeader(
+  options: {
+    allowMissingAuth?: boolean;
+    interactive?: boolean;
+  } = {}
+): Promise<string> {
   if (options.allowMissingAuth && !(await isSsoEnabled())) {
     return "";
   }
@@ -580,12 +644,15 @@ async function getAuthConfig(): Promise<AuthConfigResponse> {
 
 async function getLoginHint(): Promise<string | undefined> {
   try {
-    const officeAuth = (Office as unknown as {
-      auth?: {
-        getAuthContext?: () => Promise<{ userPrincipalName?: string }>;
-      };
-    }).auth;
-    const authContext = officeAuth && officeAuth.getAuthContext ? await officeAuth.getAuthContext() : null;
+    const officeAuth = (
+      Office as unknown as {
+        auth?: {
+          getAuthContext?: () => Promise<{ userPrincipalName?: string }>;
+        };
+      }
+    ).auth;
+    const authContext =
+      officeAuth && officeAuth.getAuthContext ? await officeAuth.getAuthContext() : null;
     return authContext && authContext.userPrincipalName ? authContext.userPrincipalName : undefined;
   } catch {
     return undefined;
@@ -593,14 +660,18 @@ async function getLoginHint(): Promise<string | undefined> {
 }
 
 function setSignedOut() {
-  getLogoutButton().hidden = true;
+  setConnectionState(false);
   clearTickets();
-  setStatus("signed-out", "Enter your Halo URL and client ID to start.", "");
+  setStatus(
+    "signed-out",
+    "Connect to HaloPSA to start",
+    "Enter your HaloPSA URL and API application client ID."
+  );
 }
 
 function setFailed(error: unknown, options: { hideLogout?: boolean; message?: string } = {}) {
   if (options.hideLogout !== false) {
-    getLogoutButton().hidden = true;
+    setConnectionState(false);
   }
 
   const detail = error instanceof Error ? error.message : "Unexpected Halo auth error.";
@@ -641,6 +712,9 @@ function setBusy(isBusy: boolean) {
   getLoginButton().disabled = isBusy;
   getLogoutButton().disabled = isBusy;
   getRefreshTicketsButton().disabled = isBusy;
+  getSearchTicketsButton().disabled = isBusy;
+  getClearSearchButton().disabled = isBusy;
+  getTicketNumberInput().disabled = isBusy;
   getHaloUrlInput().disabled = isBusy;
   getClientIdInput().disabled = isBusy;
 }
@@ -649,8 +723,24 @@ function setTicketsBusy(isBusy: boolean) {
   getRefreshTicketsButton().disabled = isBusy;
 }
 
+function setSearchBusy(isBusy: boolean) {
+  getSearchTicketsButton().disabled = isBusy;
+  getClearSearchButton().disabled = isBusy;
+  getTicketNumberInput().disabled = isBusy;
+  setTicketButtonsBusy(isBusy);
+}
+
+function setConnectionState(isConnected: boolean) {
+  getConnectionPanel().hidden = isConnected;
+  getLogoutButton().hidden = !isConnected;
+  const appBody = document.getElementById("app-body");
+  if (appBody) {
+    appBody.dataset.connected = isConnected ? "true" : "false";
+  }
+}
+
 function setTicketButtonsBusy(isBusy: boolean) {
-  const ticketButtons = document.querySelectorAll(".halo-auth__ticket");
+  const ticketButtons = document.querySelectorAll(".halo-ticket");
   for (let index = 0; index < ticketButtons.length; index += 1) {
     (ticketButtons[index] as HTMLButtonElement).disabled = isBusy;
   }
@@ -752,35 +842,81 @@ function renderDebug(debug: unknown): string {
 
 function renderTickets(tickets: HaloTicket[]) {
   const ticketsPanel = getTicketsPanel();
-  const ticketsList = getTicketsList();
-  const ticketsEmpty = getTicketsEmpty();
 
   ticketsPanel.hidden = false;
   clearTicketList();
-  ticketsEmpty.hidden = tickets.length > 0;
+  getTicketsEmpty().hidden = tickets.length > 0;
+  renderTicketList(tickets, getTicketsList());
+}
 
+function renderSearchResults(tickets: HaloTicket[]) {
+  getSearchResults().hidden = false;
+  clearSearchList();
+  getSearchEmpty().hidden = tickets.length > 0;
+  renderTicketList(tickets, getSearchList());
+}
+
+function renderTicketList(tickets: HaloTicket[], container: HTMLElement) {
   tickets.forEach((ticket) => {
     const button = document.createElement("button");
     button.type = "button";
-    button.className = "halo-auth__ticket";
+    button.className = "halo-ticket";
     button.dataset.selected = "false";
+    button.setAttribute("aria-label", `Attach email to ${formatTicketTitle(ticket)}`);
     button.onclick = () => void attachEmailToTicket(ticket, button);
 
-    const title = document.createElement("span");
-    title.className = "halo-auth__ticket-title";
-    title.textContent = formatTicketTitle(ticket);
+    const main = document.createElement("span");
+    main.className = "halo-ticket__main";
 
-    const meta = document.createElement("span");
-    meta.className = "halo-auth__ticket-meta";
-    meta.textContent = formatTicketMeta(ticket);
+    const number = document.createElement("span");
+    number.className = "halo-ticket__number";
+    number.textContent = ticket.ticketNumber || ticket.id || "Ticket";
 
-    button.appendChild(title);
-    if (meta.textContent) {
+    const summary = document.createElement("span");
+    summary.className = "halo-ticket__summary";
+    summary.textContent = ticket.summary || "Untitled ticket";
+
+    main.appendChild(number);
+    main.appendChild(summary);
+    button.appendChild(main);
+
+    if (ticket.status) {
+      const status = document.createElement("span");
+      status.className = "halo-ticket__status";
+      status.textContent = ticket.status;
+      button.appendChild(status);
+    } else {
+      button.appendChild(createTicketChevron());
+    }
+
+    const metaValues = [ticket.client, ticket.agent].filter(Boolean);
+    if (metaValues.length) {
+      const meta = document.createElement("span");
+      meta.className = "halo-ticket__meta";
+
+      metaValues.forEach((value) => {
+        const item = document.createElement("span");
+        item.className = "halo-ticket__meta-item";
+        item.textContent = value;
+        meta.appendChild(item);
+      });
+
       button.appendChild(meta);
     }
 
-    ticketsList.appendChild(button);
+    container.appendChild(button);
   });
+}
+
+function createTicketChevron(): SVGElement {
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("class", "halo-ticket__chevron");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("aria-hidden", "true");
+  const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  path.setAttribute("d", "m9 18 6-6-6-6");
+  svg.appendChild(path);
+  return svg;
 }
 
 async function attachEmailToTicket(ticket: HaloTicket, selectedButton: HTMLElement) {
@@ -838,7 +974,7 @@ async function attachEmailToTicket(ticket: HaloTicket, selectedButton: HTMLEleme
 }
 
 function selectTicketButton(selectedButton: HTMLElement) {
-  const ticketButtons = document.querySelectorAll(".halo-auth__ticket");
+  const ticketButtons = document.querySelectorAll(".halo-ticket");
   for (let index = 0; index < ticketButtons.length; index += 1) {
     (ticketButtons[index] as HTMLElement).dataset.selected = "false";
   }
@@ -852,20 +988,31 @@ function formatTicketTitle(ticket: HaloTicket): string {
   return label ? `${label} - ${summary}` : summary;
 }
 
-function formatTicketMeta(ticket: HaloTicket): string {
-  return [ticket.status, ticket.client, ticket.agent].filter(Boolean).join(" | ");
-}
-
 function clearTickets() {
   getTicketsPanel().hidden = true;
   getTicketsEmpty().hidden = true;
   clearTicketList();
+  clearSearchResults();
 }
 
 function clearTicketList() {
   const ticketsList = getTicketsList();
   while (ticketsList.firstChild) {
     ticketsList.removeChild(ticketsList.firstChild);
+  }
+}
+
+function clearSearchResults() {
+  getTicketNumberInput().value = "";
+  getSearchResults().hidden = true;
+  getSearchEmpty().hidden = true;
+  clearSearchList();
+}
+
+function clearSearchList() {
+  const searchList = getSearchList();
+  while (searchList.firstChild) {
+    searchList.removeChild(searchList.firstChild);
   }
 }
 
@@ -1084,6 +1231,38 @@ function getLogoutButton(): HTMLButtonElement {
 
 function getRefreshTicketsButton(): HTMLButtonElement {
   return document.getElementById("refresh-tickets-button") as HTMLButtonElement;
+}
+
+function getConnectionPanel(): HTMLElement {
+  return document.getElementById("connection-panel") as HTMLElement;
+}
+
+function getTicketSearchForm(): HTMLFormElement {
+  return document.getElementById("ticket-search-form") as HTMLFormElement;
+}
+
+function getTicketNumberInput(): HTMLInputElement {
+  return document.getElementById("ticket-number") as HTMLInputElement;
+}
+
+function getSearchTicketsButton(): HTMLButtonElement {
+  return document.getElementById("search-tickets-button") as HTMLButtonElement;
+}
+
+function getClearSearchButton(): HTMLButtonElement {
+  return document.getElementById("clear-search-button") as HTMLButtonElement;
+}
+
+function getSearchResults(): HTMLElement {
+  return document.getElementById("search-results") as HTMLElement;
+}
+
+function getSearchEmpty(): HTMLElement {
+  return document.getElementById("search-empty") as HTMLElement;
+}
+
+function getSearchList(): HTMLElement {
+  return document.getElementById("search-list") as HTMLElement;
 }
 
 function getTicketsPanel(): HTMLElement {

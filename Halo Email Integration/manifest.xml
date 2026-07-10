@@ -1,13 +1,13 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <OfficeApp xmlns="http://schemas.microsoft.com/office/appforoffice/1.1" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:bt="http://schemas.microsoft.com/office/officeappbasictypes/1.0" xmlns:mailappor="http://schemas.microsoft.com/office/mailappversionoverrides/1.0" xsi:type="MailApp">
   <Id>55bbcff2-8191-4411-aec6-f9d2f9b4b5e8</Id>
-  <Version>1.0.0.0</Version>
+  <Version>2026.7.10.0</Version>
   <ProviderName>Digital Origin Solutions</ProviderName>
   <DefaultLocale>en-US</DefaultLocale>
-  <DisplayName DefaultValue="Halo Email Integration"/>
-  <Description DefaultValue="Attach Outlook emails to Halo PSA tickets."/>
-  <IconUrl DefaultValue="https://localhost:3000/assets/icon-64.png"/>
-  <HighResolutionIconUrl DefaultValue="https://localhost:3000/assets/icon-128.png"/>
+  <DisplayName DefaultValue="HaloPSA Outlook Add-in"/>
+  <Description DefaultValue="Search HaloPSA tickets and attach the open Outlook email."/>
+  <IconUrl DefaultValue="https://localhost:3000/assets/halo-mark-64-v3.png"/>
+  <HighResolutionIconUrl DefaultValue="https://localhost:3000/assets/halo-mark-128-v3.png"/>
   <SupportUrl DefaultValue="https://localhost:3000"/>
   <AppDomains>
     <AppDomain>https://localhost:3000</AppDomain>
@@ -98,20 +98,20 @@
     </Hosts>
     <Resources>
       <bt:Images>
-        <bt:Image id="Icon.16x16" DefaultValue="https://localhost:3000/assets/icon-16.png"/>
-        <bt:Image id="Icon.32x32" DefaultValue="https://localhost:3000/assets/icon-32.png"/>
-        <bt:Image id="Icon.80x80" DefaultValue="https://localhost:3000/assets/icon-80.png"/>
+        <bt:Image id="Icon.16x16" DefaultValue="https://localhost:3000/assets/halo-mark-16-v3.png"/>
+        <bt:Image id="Icon.32x32" DefaultValue="https://localhost:3000/assets/halo-mark-32-v3.png"/>
+        <bt:Image id="Icon.80x80" DefaultValue="https://localhost:3000/assets/halo-mark-80-v3.png"/>
       </bt:Images>
       <bt:Urls>
         <bt:Url id="Commands.Url" DefaultValue="https://localhost:3000/commands.html"/>
         <bt:Url id="Taskpane.Url" DefaultValue="https://localhost:3000/taskpane.html"/>
       </bt:Urls>
       <bt:ShortStrings>
-        <bt:String id="GroupLabel" DefaultValue="Halo PSA"/>
-        <bt:String id="TaskpaneButton.Label" DefaultValue="Connect Halo"/>
+        <bt:String id="GroupLabel" DefaultValue="HaloPSA"/>
+        <bt:String id="TaskpaneButton.Label" DefaultValue="Attach Email to Ticket"/>
       </bt:ShortStrings>
       <bt:LongStrings>
-        <bt:String id="TaskpaneButton.Tooltip" DefaultValue="Open the Halo PSA email integration pane."/>
+        <bt:String id="TaskpaneButton.Tooltip" DefaultValue="Search HaloPSA tickets and attach the open Outlook email."/>
       </bt:LongStrings>
     </Resources>
     <VersionOverrides xmlns="http://schemas.microsoft.com/office/mailappversionoverrides/1.1" xsi:type="VersionOverridesV1_1">
@@ -184,9 +184,9 @@
       </Hosts>
       <Resources>
         <bt:Images>
-          <bt:Image id="Icon.16x16" DefaultValue="https://localhost:3000/assets/icon-16.png"/>
-          <bt:Image id="Icon.32x32" DefaultValue="https://localhost:3000/assets/icon-32.png"/>
-          <bt:Image id="Icon.80x80" DefaultValue="https://localhost:3000/assets/icon-80.png"/>
+          <bt:Image id="Icon.16x16" DefaultValue="https://localhost:3000/assets/halo-mark-16-v3.png"/>
+          <bt:Image id="Icon.32x32" DefaultValue="https://localhost:3000/assets/halo-mark-32-v3.png"/>
+          <bt:Image id="Icon.80x80" DefaultValue="https://localhost:3000/assets/halo-mark-80-v3.png"/>
         </bt:Images>
         <bt:Urls>
           <bt:Url id="Commands.Url" DefaultValue="https://localhost:3000/commands.html"/>
@@ -195,11 +195,11 @@
           <bt:Url id="JSRuntime.Url" DefaultValue="https://localhost:3000/public/classic-send-runtime.js"/>
         </bt:Urls>
         <bt:ShortStrings>
-          <bt:String id="GroupLabel" DefaultValue="Halo PSA"/>
-          <bt:String id="TaskpaneButton.Label" DefaultValue="Connect Halo"/>
+          <bt:String id="GroupLabel" DefaultValue="HaloPSA"/>
+          <bt:String id="TaskpaneButton.Label" DefaultValue="Attach Email to Ticket"/>
         </bt:ShortStrings>
         <bt:LongStrings>
-          <bt:String id="TaskpaneButton.Tooltip" DefaultValue="Open the Halo PSA email integration pane."/>
+          <bt:String id="TaskpaneButton.Tooltip" DefaultValue="Search HaloPSA tickets and attach the open Outlook email."/>
         </bt:LongStrings>
       </Resources>
     </VersionOverrides>

@@ -185,7 +185,9 @@ function registerHaloAuthRoutes(app, options = {}) {
       handoffs.delete(handoffCode);
 
       if (handoff.userId !== user.id) {
-        sendJson(res, 403, { error: "The Halo login handoff belongs to a different Microsoft user." });
+        sendJson(res, 403, {
+          error: "The Halo login handoff belongs to a different Microsoft user.",
+        });
         return;
       }
 
@@ -313,6 +315,45 @@ function registerHaloAuthRoutes(app, options = {}) {
       sendJson(res, getErrorStatus(error, 502), {
         ok: false,
         message: "Halo ticket list failed",
+        error: publicError(error),
+        debug: publicDebug(error),
+      });
+    }
+  });
+
+  app.get("/api/halo/tickets/search", async (req, res) => {
+    try {
+      const record = await getSessionOrBearerGrant(req);
+
+      if (!record) {
+        sendJson(res, 401, {
+          ok: false,
+          message: "Halo ticket search failed",
+          error: "No active Halo session.",
+        });
+        return;
+      }
+
+      const ticketNumber = getTicketNumberSearch(req);
+      const payload = await callHaloApiWithRefresh(
+        record,
+        buildTicketSearchPath(ticketNumber),
+        "tickets-search",
+        "Halo ticket search failed"
+      );
+      const tickets = preferExactTicketMatches(
+        normalizeTickets(payload, null, { openOnly: false }),
+        ticketNumber
+      );
+
+      sendJson(res, 200, {
+        ok: true,
+        tickets,
+      });
+    } catch (error) {
+      sendJson(res, getErrorStatus(error, 502), {
+        ok: false,
+        message: "Halo ticket search failed",
         error: publicError(error),
         debug: publicDebug(error),
       });
@@ -547,7 +588,14 @@ function registerHaloAuthRoutes(app, options = {}) {
   });
 }
 
-async function exchangeAuthorizationCode({ haloUrl, clientId, code, codeVerifier, redirectUri, scope }) {
+async function exchangeAuthorizationCode({
+  haloUrl,
+  clientId,
+  code,
+  codeVerifier,
+  redirectUri,
+  scope,
+}) {
   const form = new URLSearchParams();
   form.set("grant_type", "authorization_code");
   form.set("code", code);
@@ -604,7 +652,11 @@ async function refreshAccessToken(record, currentTokenPayload) {
     if (record.grantId) {
       authStore.invalidateGrantById(record.grantId);
     }
-    throw HttpError.fromResponse("Halo refresh token request failed", "token-refresh", responseDetails);
+    throw HttpError.fromResponse(
+      "Halo refresh token request failed",
+      "token-refresh",
+      responseDetails
+    );
   }
 
   const nextTokenPayload = annotateTokenPayload({
@@ -667,7 +719,16 @@ async function callHaloApiWithRefresh(record, requestOrPath, phase, messagePrefi
   }
 }
 
-async function fetchHaloJson({ body, haloUrl, messagePrefix, method, path, phase, scope, tokenPayload }) {
+async function fetchHaloJson({
+  body,
+  haloUrl,
+  messagePrefix,
+  method,
+  path,
+  phase,
+  scope,
+  tokenPayload,
+}) {
   const requestUrl = resolveHaloUrl(haloUrl, path);
   const headers = {
     Accept: "application/json",
@@ -712,6 +773,34 @@ function buildMyOpenTicketsPath() {
   params.set("includestatus", "true");
 
   return `/api/Tickets?${params.toString()}`;
+}
+
+function buildTicketSearchPath(ticketNumber) {
+  const params = new URLSearchParams();
+  params.set("count", "20");
+  params.set("search", ticketNumber);
+  params.set("includeagent", "true");
+  params.set("includestatus", "true");
+
+  return `/api/Tickets?${params.toString()}`;
+}
+
+function getTicketNumberSearch(req) {
+  const value = getRequestUrl(req).searchParams.get("ticketNumber");
+  const ticketNumber = stringifyField(value)
+    .replace(/^\[?\s*id\s*:\s*/i, "")
+    .replace(/\]\s*$/, "")
+    .trim();
+
+  if (!ticketNumber) {
+    throw new RequestError("Enter a Halo ticket number.", 400);
+  }
+
+  if (ticketNumber.length > 50) {
+    throw new RequestError("Halo ticket numbers must be 50 characters or fewer.", 400);
+  }
+
+  return ticketNumber;
 }
 
 function getTicketIdFromRequest(req) {
@@ -873,7 +962,12 @@ function normalizeMessageIdKey(value) {
   return normalizeMessageId(value).toLowerCase();
 }
 
-function storeConversationMapping({ email, includeThreadMessageIds = false, ticketId, ticketNumber }) {
+function storeConversationMapping({
+  email,
+  includeThreadMessageIds = false,
+  ticketId,
+  ticketNumber,
+}) {
   const mailboxEmail = normalizeMailboxEmail(email.mailboxEmail);
 
   if (!mailboxEmail || !email.internetMessageId) {
@@ -1166,7 +1260,10 @@ function trimEmailBody(email) {
 function trimQuotedHtml(value) {
   const trimIndex = getFirstUsableIndex([
     getPatternIndex(value, /<blockquote\b/i),
-    getPatternIndex(value, /<[^>]+\bclass=["'][^"']*(?:gmail_quote|moz-cite-prefix|yahoo_quoted)[^"']*["'][^>]*>/i),
+    getPatternIndex(
+      value,
+      /<[^>]+\bclass=["'][^"']*(?:gmail_quote|moz-cite-prefix|yahoo_quoted)[^"']*["'][^>]*>/i
+    ),
     getPatternIndex(value, /\bOn\s+[\s\S]{1,500}?\s+wrote:/i),
     getOutlookHeaderIndex(value),
   ]);
@@ -1196,9 +1293,7 @@ function getPatternIndex(value, pattern) {
 }
 
 function getOutlookHeaderIndex(value) {
-  const match = /(?:^|[\r\n]|<[^>]+>)\s*(?:<b>|<strong>)?From:(?:<\/b>|<\/strong>)?/i.exec(
-    value
-  );
+  const match = /(?:^|[\r\n]|<[^>]+>)\s*(?:<b>|<strong>)?From:(?:<\/b>|<\/strong>)?/i.exec(value);
 
   if (!match) {
     return -1;
@@ -1247,8 +1342,12 @@ function escapeHtml(value) {
     .replace(/'/g, "&#39;");
 }
 
-function normalizeTickets(payload, currentAgentId) {
-  let tickets = getTicketArray(payload).filter((ticket) => isOpenTicket(ticket));
+function normalizeTickets(payload, currentAgentId, options = {}) {
+  let tickets = getTicketArray(payload);
+
+  if (options.openOnly !== false) {
+    tickets = tickets.filter((ticket) => isOpenTicket(ticket));
+  }
 
   if (currentAgentId) {
     tickets = tickets.filter((ticket) => isAssignedToAgent(ticket, currentAgentId));
@@ -1257,6 +1356,24 @@ function normalizeTickets(payload, currentAgentId) {
   return tickets
     .map((ticket) => toTicketSummary(ticket))
     .filter((ticket) => ticket.id || ticket.ticketNumber || ticket.summary);
+}
+
+function preferExactTicketMatches(tickets, ticketNumber) {
+  const expected = normalizeTicketNumber(ticketNumber);
+  const exactMatches = tickets.filter((ticket) => {
+    return [ticket.id, ticket.ticketNumber]
+      .map((value) => normalizeTicketNumber(value))
+      .some((value) => value && value === expected);
+  });
+
+  return exactMatches.length ? exactMatches : tickets;
+}
+
+function normalizeTicketNumber(value) {
+  return stringifyField(value)
+    .replace(/^#/, "")
+    .replace(/^0+(?=\d)/, "")
+    .toLowerCase();
 }
 
 function getTicketArray(payload) {
@@ -1268,7 +1385,16 @@ function getTicketArray(payload) {
     return [];
   }
 
-  const possibleKeys = ["tickets", "Tickets", "items", "Items", "results", "Results", "data", "Data"];
+  const possibleKeys = [
+    "tickets",
+    "Tickets",
+    "items",
+    "Items",
+    "results",
+    "Results",
+    "data",
+    "Data",
+  ];
   for (const key of possibleKeys) {
     if (Array.isArray(payload[key])) {
       return payload[key];
@@ -1585,10 +1711,7 @@ async function getMicrosoftUserFromRequest(req) {
   try {
     claims = await microsoftAuthVerifier.verify(token);
   } catch (error) {
-    throw new RequestError(
-      `Microsoft add-in authentication failed: ${publicError(error)}`,
-      401
-    );
+    throw new RequestError(`Microsoft add-in authentication failed: ${publicError(error)}`, 401);
   }
 
   const tenantId = stringifyField(claims.tid);
@@ -1785,7 +1908,10 @@ function hashSessionId(sessionId) {
 }
 
 function hashBackgroundSessionId(backgroundSessionId) {
-  return crypto.createHash("sha256").update(backgroundSessionId || "").digest("hex");
+  return crypto
+    .createHash("sha256")
+    .update(backgroundSessionId || "")
+    .digest("hex");
 }
 
 function randomBase64Url(byteLength) {
@@ -1793,11 +1919,7 @@ function randomBase64Url(byteLength) {
 }
 
 function base64Url(buffer) {
-  return buffer
-    .toString("base64")
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(/=+$/g, "");
+  return buffer.toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
 }
 
 function cleanExpiredRecords() {
@@ -1883,14 +2005,18 @@ class HttpError extends Error {
     const statusLabel = `${responseDetails.status}${responseDetails.statusText ? ` ${responseDetails.statusText}` : ""}`;
     const responseError = safeResponseError(responseDetails);
 
-    return new HttpError(`${messagePrefix}: HTTP ${statusLabel} - ${responseError}`, responseDetails.status, {
-      bodyExcerpt: getBodyExcerpt(responseDetails.bodyText),
-      contentType: responseDetails.contentType || "(none)",
-      endpoint: responseDetails.requestUrl,
-      phase,
-      status: responseDetails.status,
-      statusText: responseDetails.statusText || "",
-    });
+    return new HttpError(
+      `${messagePrefix}: HTTP ${statusLabel} - ${responseError}`,
+      responseDetails.status,
+      {
+        bodyExcerpt: getBodyExcerpt(responseDetails.bodyText),
+        contentType: responseDetails.contentType || "(none)",
+        endpoint: responseDetails.requestUrl,
+        phase,
+        status: responseDetails.status,
+        statusText: responseDetails.statusText || "",
+      }
+    );
   }
 }
 

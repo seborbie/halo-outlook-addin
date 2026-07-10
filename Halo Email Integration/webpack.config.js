@@ -4,6 +4,9 @@ const devCerts = require("office-addin-dev-certs");
 const CopyWebpackPlugin = require("copy-webpack-plugin");
 const HtmlWebpackPlugin = require("html-webpack-plugin");
 const path = require("path");
+
+require("dotenv").config({ path: path.resolve(__dirname, ".env") });
+
 const { registerHaloAuthRoutes } = require("./server/haloAuth");
 
 const urlDev = "https://localhost:3000/";
@@ -69,6 +72,12 @@ module.exports = async (env, options) => {
           {
             from: "src/commands/classic-send-runtime.js",
             to: "classic-send-runtime.js",
+            transform(content) {
+              const runtimeBaseUrl = (dev ? urlDev : urlProd).replace(/\/+$/, "");
+              return content
+                .toString()
+                .replace(new RegExp("__HALO_PUBLIC_BASE_URL__", "g"), runtimeBaseUrl);
+            },
           },
           {
             from: "manifest*.xml",
