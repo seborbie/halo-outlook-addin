@@ -588,8 +588,8 @@ async function acquireMicrosoftToken(interactive: boolean, forceRefresh = false)
   }
 
   const msalInstance = (await getMsalInstance()) as {
-    acquireTokenPopup: (request: unknown) => Promise<{ accessToken?: string; idToken?: string }>;
-    ssoSilent: (request: unknown) => Promise<{ accessToken?: string; idToken?: string }>;
+    acquireTokenPopup: (request: unknown) => Promise<{ accessToken?: string }>;
+    ssoSilent: (request: unknown) => Promise<{ accessToken?: string }>;
   };
   const request = {
     forceRefresh,
@@ -599,15 +599,23 @@ async function acquireMicrosoftToken(interactive: boolean, forceRefresh = false)
 
   try {
     const result = await msalInstance.ssoSilent(request);
-    return result.idToken || result.accessToken || "";
+    return requireMicrosoftAccessToken(result);
   } catch (error) {
     if (!interactive || !(error instanceof InteractionRequiredAuthError)) {
       throw error;
     }
 
     const result = await msalInstance.acquireTokenPopup(request);
-    return result.idToken || result.accessToken || "";
+    return requireMicrosoftAccessToken(result);
   }
+}
+
+function requireMicrosoftAccessToken(result: { accessToken?: string }): string {
+  if (!result.accessToken) {
+    throw new Error("Microsoft did not return an access token for the add-in API.");
+  }
+
+  return result.accessToken;
 }
 
 async function getMsalInstance(): Promise<unknown> {

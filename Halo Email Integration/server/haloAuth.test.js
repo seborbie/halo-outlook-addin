@@ -8,6 +8,7 @@ const os = require("os");
 const path = require("path");
 const { registerHaloAuthRoutes } = require("./haloAuth");
 const { createHaloStore } = require("./haloStore");
+const { getApiAudience, getAuthScopes, validateMicrosoftClaims } = require("./microsoftAuth");
 const { decodeEncryptionKey } = require("./tokenCrypto");
 
 const TEST_AUTH_HEADER = "Bearer test-microsoft-token";
@@ -205,6 +206,30 @@ function createSendPayload(overrides = {}) {
 }
 
 async function run() {
+  assert.strictEqual(getApiAudience("test-client-id"), "api://test-client-id");
+  assert.deepStrictEqual(getAuthScopes("api://test-client-id"), [
+    "api://test-client-id/access_as_user",
+  ]);
+  assert.deepStrictEqual(
+    getAuthScopes("api://test-client-id", "api://test-client-id/custom.scope openid"),
+    ["api://test-client-id/custom.scope", "openid"]
+  );
+  assert.throws(
+    () => getAuthScopes("api://test-client-id", "openid profile email User.Read"),
+    /delegated scope for the add-in API/
+  );
+  assert.doesNotThrow(() =>
+    validateMicrosoftClaims({
+      iss: "https://login.microsoftonline.com/test-tenant-id/v2.0",
+      oid: "test-object-id",
+      scp: "access_as_user",
+      tid: "test-tenant-id",
+    })
+  );
+  assert.throws(
+    () => validateMicrosoftClaims({ oid: "test-object-id", tid: "test-tenant-id" }),
+    /access_as_user scope/
+  );
   assert.throws(
     () =>
       registerHaloAuthRoutes(createMockApp(), {

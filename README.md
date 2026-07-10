@@ -28,7 +28,9 @@ Optional environment:
 ```text
 HALO_DB_PATH=./data/halo.sqlite
 ADDIN_AUTHORITY=https://login.microsoftonline.com/common
-ADDIN_AUTH_SCOPES=openid profile email User.Read
+ADDIN_API_AUDIENCE=api://<Microsoft Entra app client ID>
+ADDIN_AUTH_SCOPES=api://<Microsoft Entra app client ID>/access_as_user
+ADDIN_REQUIRED_SCOPE=access_as_user
 PUBLIC_BASE_URL=https://your-addin-host.example.com
 PORT=3000
 ```
@@ -59,7 +61,15 @@ brk-multihub://your-addin-host.example.com
 Do not include `/taskpane.html`, `/auth/callback`, or another path in the `brk-multihub://` redirect. Microsoft NAA expects the add-in origin.
 
 6. Copy the Application (client) ID from the app registration and use it as `ADDIN_CLIENT_ID`.
-7. The default scope list includes `User.Read`, plus the OpenID profile scopes needed for sign-in. Keep `ADDIN_AUTH_SCOPES` unset unless you have a reason to change the requested Microsoft scopes.
+7. Go to **Expose an API**, add an Application ID URI, and accept the default `api://<ADDIN_CLIENT_ID>` value.
+8. Add a delegated scope named `access_as_user`. Allow admins and users to consent, enable the scope, and use descriptions explaining that it lets the add-in call its web API as the signed-in user.
+9. In **Expose an API**, select **Add a client application**, enter the same `ADDIN_CLIENT_ID`, select `access_as_user`, and add the application. This preauthorizes the add-in to call its own API.
+10. Go to **API permissions** > **Add a permission** > **My APIs**, choose this application, add the delegated `access_as_user` permission, and grant admin consent if required by your tenant.
+11. Open the app registration's manifest, set `api.requestedAccessTokenVersion` to `2`, and save it.
+
+The add-in derives the API audience and requested scope from `ADDIN_CLIENT_ID`. Keep `ADDIN_API_AUDIENCE`, `ADDIN_AUTH_SCOPES`, and `ADDIN_REQUIRED_SCOPE` unset when using the values above. Those settings only need overriding if you deliberately use a custom Application ID URI or scope name.
+
+Remove any legacy `ADDIN_AUTH_SCOPES=openid profile email User.Read` setting from local or Azure configuration. That requests a Microsoft Graph token, which is not valid for this add-in's web API. The server rejects configured scopes that do not target its own API so this cannot silently regress into repeated 401 responses.
 
 Reference: [Microsoft nested app authentication for Office Add-ins](https://learn.microsoft.com/en-us/office/dev/add-ins/develop/enable-nested-app-authentication-in-your-add-in).
 
