@@ -28,6 +28,7 @@ Optional environment:
 ```text
 HALO_DB_PATH=./data/halo.sqlite
 ADDIN_AUTHORITY=https://login.microsoftonline.com/common
+ADDIN_API_CLIENT_ID=<Microsoft Entra API app client ID>
 ADDIN_API_AUDIENCE=api://<Microsoft Entra app client ID>
 ADDIN_AUTH_SCOPES=api://<Microsoft Entra app client ID>/access_as_user
 ADDIN_REQUIRED_SCOPE=access_as_user
@@ -67,7 +68,7 @@ Do not include `/taskpane.html`, `/auth/callback`, or another path in the `brk-m
 10. Go to **API permissions** > **Add a permission** > **My APIs**, choose this application, add the delegated `access_as_user` permission, and grant admin consent if required by your tenant.
 11. Open the app registration's manifest, set `api.requestedAccessTokenVersion` to `2`, and save it.
 
-The add-in derives the API audience and requested scope from `ADDIN_CLIENT_ID`. Keep `ADDIN_API_AUDIENCE`, `ADDIN_AUTH_SCOPES`, and `ADDIN_REQUIRED_SCOPE` unset when using the values above. Those settings only need overriding if you deliberately use a custom Application ID URI or scope name.
+The add-in derives the API client ID, API audience, and requested scope from `ADDIN_CLIENT_ID`. Keep `ADDIN_API_CLIENT_ID`, `ADDIN_API_AUDIENCE`, `ADDIN_AUTH_SCOPES`, and `ADDIN_REQUIRED_SCOPE` unset when using the values above. Those settings only need overriding if you deliberately use a separate API app registration, custom Application ID URI, or custom scope name.
 
 Remove any legacy `ADDIN_AUTH_SCOPES=openid profile email User.Read` setting from local or Azure configuration. That requests a Microsoft Graph token, which is not valid for this add-in's web API. The server rejects configured scopes that do not target its own API so this cannot silently regress into repeated 401 responses.
 

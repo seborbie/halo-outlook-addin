@@ -8,7 +8,12 @@ const os = require("os");
 const path = require("path");
 const { registerHaloAuthRoutes } = require("./haloAuth");
 const { createHaloStore } = require("./haloStore");
-const { getApiAudience, getAuthScopes, validateMicrosoftClaims } = require("./microsoftAuth");
+const {
+  getApiAudience,
+  getAuthScopes,
+  getTokenAudiences,
+  validateMicrosoftClaims,
+} = require("./microsoftAuth");
 const { decodeEncryptionKey } = require("./tokenCrypto");
 
 const TEST_AUTH_HEADER = "Bearer test-microsoft-token";
@@ -207,6 +212,14 @@ function createSendPayload(overrides = {}) {
 
 async function run() {
   assert.strictEqual(getApiAudience("test-client-id"), "api://test-client-id");
+  assert.deepStrictEqual(getTokenAudiences("test-client-id", "api://test-client-id"), [
+    "test-client-id",
+    "api://test-client-id",
+  ]);
+  assert.deepStrictEqual(
+    getTokenAudiences("spa-client-id", "api://custom-api", "api-client-id"),
+    ["api-client-id", "api://custom-api"]
+  );
   assert.deepStrictEqual(getAuthScopes("api://test-client-id"), [
     "api://test-client-id/access_as_user",
   ]);

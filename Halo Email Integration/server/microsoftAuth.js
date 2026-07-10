@@ -8,6 +8,11 @@ function createMicrosoftAuthVerifier(options = {}) {
   const audience = normalizeAudience(
     options.audience || process.env.ADDIN_API_AUDIENCE || getApiAudience(clientId)
   );
+  const tokenAudiences = getTokenAudiences(
+    clientId,
+    audience,
+    options.apiClientId || process.env.ADDIN_API_CLIENT_ID
+  );
   const requiredScope =
     options.requiredScope || process.env.ADDIN_REQUIRED_SCOPE || "access_as_user";
 
@@ -26,7 +31,7 @@ function createMicrosoftAuthVerifier(options = {}) {
     enabled: true,
     async verify(token) {
       const result = await jwtVerify(token, jwks, {
-        audience,
+        audience: tokenAudiences,
         clockTolerance: 30,
       });
       const claims = result.payload;
@@ -76,6 +81,12 @@ function getApiAudience(clientId) {
   return clientId ? `api://${clientId}` : "";
 }
 
+function getTokenAudiences(clientId, audience, configuredApiClientId) {
+  return Array.from(
+    new Set([configuredApiClientId || clientId, normalizeAudience(audience)].filter(Boolean))
+  );
+}
+
 function normalizeAudience(value) {
   return String(value || "").replace(/\/+$/, "");
 }
@@ -113,5 +124,6 @@ module.exports = {
   getApiAudience,
   getAuthScopes,
   getMicrosoftAuthConfig,
+  getTokenAudiences,
   validateMicrosoftClaims,
 };
