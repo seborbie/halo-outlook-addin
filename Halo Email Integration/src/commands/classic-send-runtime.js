@@ -5,37 +5,44 @@
   var BACKGROUND_SESSION_STORAGE_KEY = "halo-auth-background-session-v1";
   var SEND_AUTO_ATTACH_URL = "__HALO_PUBLIC_BASE_URL__/api/halo/email/send-auto-attach";
   var SEND_AUTO_ATTACH_TIMEOUT_MS = 4500;
+  var SEND_EVENT_TIMEOUT_MS = 4000;
 
   function onHaloMessageSend(event) {
+    var complete = createSendEventCompletion(event);
+    var watchdog = setTimeout(function () {
+      complete({ allowEvent: true });
+    }, SEND_EVENT_TIMEOUT_MS);
+
     try {
       readCurrentComposeEmail(function (readError, email) {
         if (readError || !email) {
-          completeAllow(event);
+          completeAllow(complete);
           return;
         }
 
         sendAutoAttach(email, function (sendError, result) {
           if (sendError || !result) {
-            completeAllow(event);
+            completeAllow(complete);
             return;
           }
 
           if (result.ok || result.status === "no-match" || result.status === "no-session") {
-            completeAllow(event);
+            completeAllow(complete);
             return;
           }
 
           if (result.ticketNumber || result.ticketId) {
-            completeWithHaloWarning(event, result);
+            completeWithHaloWarning(complete, result);
             return;
           }
 
-          completeAllow(event);
+          completeAllow(complete);
         });
       });
     } catch (error) {
       void error;
-      completeAllow(event);
+      clearTimeout(watchdog);
+      completeAllow(complete);
     }
   }
 
@@ -389,13 +396,26 @@
     return fallback;
   }
 
-  function completeAllow(event) {
-    event.completed({ allowEvent: true });
+  function createSendEventCompletion(event) {
+    var completed = false;
+
+    return function (options) {
+      if (completed) {
+        return;
+      }
+
+      completed = true;
+      event.completed(options);
+    };
   }
 
-  function completeWithHaloWarning(event, result) {
+  function completeAllow(complete) {
+    complete({ allowEvent: true });
+  }
+
+  function completeWithHaloWarning(complete, result) {
     var ticketLabel = result.ticketNumber || result.ticketId || "the mapped Halo ticket";
-    event.completed({
+    complete({
       allowEvent: false,
       errorMessage:
         "Could not add this reply to Halo ticket " + ticketLabel + ". Send anyway or try again.",

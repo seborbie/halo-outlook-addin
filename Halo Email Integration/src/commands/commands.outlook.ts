@@ -3,6 +3,7 @@
 const BACKGROUND_SESSION_STORAGE_KEY = "halo-auth-background-session-v1";
 const SEND_AUTO_ATTACH_URL = `${window.location.origin}/api/halo/email/send-auto-attach`;
 const SEND_AUTO_ATTACH_TIMEOUT_MS = 4500;
+const SEND_EVENT_TIMEOUT_MS = 4000;
 
 type EmailAddressPayload = {
   displayName: string;
@@ -43,6 +44,8 @@ type HaloSendEvent = {
   completed: (options?: { allowEvent?: boolean; errorMessage?: string }) => void;
 };
 
+type CompleteSendEvent = (options?: { allowEvent?: boolean; errorMessage?: string }) => void;
+
 type ComposeItem = {
   body?: {
     getAsync: (
@@ -76,28 +79,33 @@ type SubjectCollection = {
 };
 
 export async function onHaloMessageSend(event: HaloSendEvent) {
+  const complete = createSendEventCompletion(event);
+  const watchdog = setTimeout(() => complete({ allowEvent: true }), SEND_EVENT_TIMEOUT_MS);
+
   try {
     const email = await readCurrentComposeEmail();
 
     if (!email) {
-      completeAllow(event);
+      completeAllow(complete);
       return;
     }
 
     const result = await sendAutoAttach(email);
     if (result.ok || result.status === "no-match" || result.status === "no-session") {
-      completeAllow(event);
+      completeAllow(complete);
       return;
     }
 
     if (result.ticketNumber || result.ticketId) {
-      completeWithHaloWarning(event, result);
+      completeWithHaloWarning(complete, result);
       return;
     }
 
-    completeAllow(event);
+    completeAllow(complete);
   } catch {
-    completeAllow(event);
+    completeAllow(complete);
+  } finally {
+    clearTimeout(watchdog);
   }
 }
 
@@ -329,13 +337,26 @@ function normalizeSubject(value: string): string {
   return value.replace(/^(\s*(re|fw|fwd)\s*:\s*)+/i, "").trim();
 }
 
-function completeAllow(event: HaloSendEvent) {
-  event.completed({ allowEvent: true });
+function createSendEventCompletion(event: HaloSendEvent): CompleteSendEvent {
+  let completed = false;
+
+  return (options) => {
+    if (completed) {
+      return;
+    }
+
+    completed = true;
+    event.completed(options);
+  };
 }
 
-function completeWithHaloWarning(event: HaloSendEvent, result: HaloSendAutoAttachResponse) {
+function completeAllow(complete: CompleteSendEvent) {
+  complete({ allowEvent: true });
+}
+
+function completeWithHaloWarning(complete: CompleteSendEvent, result: HaloSendAutoAttachResponse) {
   const ticketLabel = result.ticketNumber || result.ticketId || "the mapped Halo ticket";
-  event.completed({
+  complete({
     allowEvent: false,
     errorMessage: `Could not add this reply to Halo ticket ${ticketLabel}. Send anyway or try again.`,
   });
