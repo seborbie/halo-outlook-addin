@@ -58,6 +58,10 @@ jobs:
         working-directory: ${{ env.APP_DIRECTORY }}
         run: npm run test:auth
 
+      - name: Run send runtime tests
+        working-directory: ${{ env.APP_DIRECTORY }}
+        run: npm run test:send-runtime
+
       - name: Build production assets
         working-directory: ${{ env.APP_DIRECTORY }}
         env:

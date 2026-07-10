@@ -25,6 +25,7 @@
     "start": "office-addin-debugging start manifest.xml",
     "stop": "office-addin-debugging stop manifest.xml",
     "test:auth": "node server/haloAuth.test.js",
+    "test:send-runtime": "node server/classicSendRuntime.test.js",
     "validate": "office-addin-manifest validate manifest.xml",
     "watch": "webpack --mode development --watch"
   },
