@@ -98,6 +98,7 @@ module.exports = async (env, options) => {
           {
             from: "src/commands/classic-send-runtime.js",
             to: "classic-send-runtime.js",
+            info: { minimized: true },
             transform(content) {
               return content
                 .toString()

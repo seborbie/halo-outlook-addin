@@ -5,7 +5,7 @@
   var BACKGROUND_SESSION_STORAGE_KEY = "halo-auth-background-session-v1";
   var SEND_AUTO_ATTACH_URL = "__HALO_PUBLIC_BASE_URL__/api/halo/email/send-auto-attach";
   var SEND_AUTO_ATTACH_TIMEOUT_MS = 4500;
-  var SEND_EVENT_TIMEOUT_MS = 4000;
+  var SEND_EVENT_TIMEOUT_MS = 3000;
 
   function onHaloMessageSend(event) {
     var complete = createSendEventCompletion(event);

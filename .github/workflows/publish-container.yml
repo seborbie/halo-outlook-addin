@@ -68,6 +68,10 @@ jobs:
           PUBLIC_BASE_URL: ${{ vars.PUBLIC_BASE_URL }}
         run: npm run build
 
+      - name: Test built send runtime
+        working-directory: ${{ env.APP_DIRECTORY }}
+        run: npm run test:send-runtime:built
+
       - name: Validate production manifest
         working-directory: ${{ env.APP_DIRECTORY }}
         run: npx office-addin-manifest validate dist/manifest.xml

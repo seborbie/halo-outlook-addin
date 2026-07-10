@@ -3,7 +3,7 @@
 const BACKGROUND_SESSION_STORAGE_KEY = "halo-auth-background-session-v1";
 const SEND_AUTO_ATTACH_URL = `${window.location.origin}/api/halo/email/send-auto-attach`;
 const SEND_AUTO_ATTACH_TIMEOUT_MS = 4500;
-const SEND_EVENT_TIMEOUT_MS = 4000;
+const SEND_EVENT_TIMEOUT_MS = 3000;
 
 type EmailAddressPayload = {
   displayName: string;

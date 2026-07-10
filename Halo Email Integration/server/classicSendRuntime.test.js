@@ -4,10 +4,33 @@ const path = require("node:path");
 const vm = require("node:vm");
 
 function run() {
-  const runtimePath = path.join(__dirname, "..", "src", "commands", "classic-send-runtime.js");
+  const isBuiltRuntime = Boolean(process.argv[2]);
+  const runtimePath = isBuiltRuntime
+    ? path.resolve(__dirname, "..", process.argv[2])
+    : path.join(__dirname, "..", "src", "commands", "classic-send-runtime.js");
+  const commandsHtmlPath = isBuiltRuntime
+    ? path.join(__dirname, "..", "dist", "commands.html")
+    : path.join(__dirname, "..", "src", "commands", "commands.html");
   const runtime = fs.readFileSync(runtimePath, "utf8");
+  const commandsHtml = fs.readFileSync(commandsHtmlPath, "utf8");
   const timers = [];
   let sendHandler = null;
+
+  const officeReadyIndex = commandsHtml.indexOf("Office.onReady");
+  const runtimeScriptIndex = commandsHtml.indexOf("/public/classic-send-runtime.js");
+  assert(officeReadyIndex >= 0, "The HTML runtime must initialize Office.js.");
+  assert(
+    runtimeScriptIndex > officeReadyIndex,
+    "The HTML runtime must initialize Office.js before loading the send handlers."
+  );
+
+  if (isBuiltRuntime) {
+    assert.doesNotMatch(
+      runtime,
+      /\?/,
+      "The classic Outlook runtime must not be minified into unsupported conditional expressions."
+    );
+  }
 
   const Office = {
     actions: {
@@ -73,8 +96,8 @@ function run() {
   });
 
   assert.deepStrictEqual(completions, []);
-  const watchdog = timers.find((entry) => entry.delay === 4000);
-  assert(watchdog, "The send handler must register a four-second fail-open watchdog.");
+  const watchdog = timers.find((entry) => entry.delay === 3000);
+  assert(watchdog, "The send handler must register a three-second fail-open watchdog.");
 
   watchdog.callback();
   assert.strictEqual(completions.length, 1);
