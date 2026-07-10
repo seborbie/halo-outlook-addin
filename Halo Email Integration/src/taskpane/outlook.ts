@@ -1,10 +1,9 @@
-/* global document, Office, fetch, localStorage, RequestInit, HTMLInputElement, HTMLButtonElement, HTMLFormElement, HTMLElement, SVGElement */
+/* global document, Office, fetch, RequestInit, HTMLInputElement, HTMLButtonElement, HTMLFormElement, HTMLElement, SVGElement */
 import {
   createNestablePublicClientApplication,
   InteractionRequiredAuthError,
 } from "@azure/msal-browser";
 
-const CONNECTION_STORAGE_KEY = "halo-auth-connection-v1";
 const BACKGROUND_SESSION_STORAGE_KEY = "halo-auth-background-session-v1";
 
 type AuthConfigResponse = {
@@ -113,11 +112,6 @@ type HaloAuthError = Error & {
   debug?: unknown;
 };
 
-type StoredConnection = {
-  haloUrl: string;
-  clientId: string;
-};
-
 let currentDialog: Office.Dialog | null = null;
 let waitingForDialog = false;
 let checkingSession = false;
@@ -128,7 +122,6 @@ Office.onReady((info) => {
   if (info.host === Office.HostType.Outlook) {
     showApp();
     bindControls();
-    restoreConnectionSettings();
     checkExistingSession();
   }
 });
@@ -194,26 +187,12 @@ async function checkExistingSession() {
 }
 
 async function startHaloLogin() {
-  const haloUrl = getHaloUrlInput().value.trim();
-  const clientId = getClientIdInput().value.trim();
-
-  if (!haloUrl) {
-    setStatus("failed", "Halo API Auth failed", "Enter your Halo URL.");
-    return;
-  }
-
-  if (!clientId) {
-    setStatus("failed", "Halo API Auth failed", "Enter your Halo API application client ID.");
-    return;
-  }
-
   try {
     setBusy(true);
     setStatus("loading", "Opening Halo login...", "A Halo sign-in dialog will open.");
 
     const authStart = await fetchJson<AuthStartResponse>("/api/auth/start", {
       method: "POST",
-      body: JSON.stringify({ haloUrl, clientId }),
     });
 
     openHaloDialog(authStart.dialogUrl);
@@ -290,7 +269,6 @@ async function onDialogMessageReceived(arg: { message: string }) {
       body: JSON.stringify({ handoffCode: message.handoffCode }),
     });
     await saveBackgroundSessionId(complete.backgroundSessionId || "");
-    saveConnectionSettings();
     await pingHalo();
     if (!(await autoAttachCurrentEmail())) {
       await loadTickets();
@@ -662,11 +640,7 @@ async function getLoginHint(): Promise<string | undefined> {
 function setSignedOut() {
   setConnectionState(false);
   clearTickets();
-  setStatus(
-    "signed-out",
-    "Connect to HaloPSA to start",
-    "Enter your HaloPSA URL and API application client ID."
-  );
+  setStatus("signed-out", "Connect to HaloPSA to start", "Sign in with your HaloPSA account.");
 }
 
 function setFailed(error: unknown, options: { hideLogout?: boolean; message?: string } = {}) {
@@ -715,8 +689,6 @@ function setBusy(isBusy: boolean) {
   getSearchTicketsButton().disabled = isBusy;
   getClearSearchButton().disabled = isBusy;
   getTicketNumberInput().disabled = isBusy;
-  getHaloUrlInput().disabled = isBusy;
-  getClientIdInput().disabled = isBusy;
 }
 
 function setTicketsBusy(isBusy: boolean) {
@@ -744,35 +716,6 @@ function setTicketButtonsBusy(isBusy: boolean) {
   for (let index = 0; index < ticketButtons.length; index += 1) {
     (ticketButtons[index] as HTMLButtonElement).disabled = isBusy;
   }
-}
-
-function restoreConnectionSettings() {
-  try {
-    const rawValue = localStorage.getItem(CONNECTION_STORAGE_KEY);
-    if (!rawValue) {
-      return;
-    }
-
-    const stored = JSON.parse(rawValue) as StoredConnection;
-    if (stored.haloUrl) {
-      getHaloUrlInput().value = stored.haloUrl;
-    }
-
-    if (stored.clientId) {
-      getClientIdInput().value = stored.clientId;
-    }
-  } catch {
-    localStorage.removeItem(CONNECTION_STORAGE_KEY);
-  }
-}
-
-function saveConnectionSettings() {
-  const stored: StoredConnection = {
-    haloUrl: getHaloUrlInput().value.trim(),
-    clientId: getClientIdInput().value.trim(),
-  };
-
-  localStorage.setItem(CONNECTION_STORAGE_KEY, JSON.stringify(stored));
 }
 
 function saveBackgroundSessionId(backgroundSessionId: string): Promise<void> {
@@ -1211,14 +1154,6 @@ function normalizeEmailAddress(value?: Office.EmailAddressDetails): EmailAddress
     displayName: value.displayName || "",
     emailAddress: value.emailAddress || "",
   };
-}
-
-function getHaloUrlInput(): HTMLInputElement {
-  return document.getElementById("halo-url") as HTMLInputElement;
-}
-
-function getClientIdInput(): HTMLInputElement {
-  return document.getElementById("halo-client-id") as HTMLInputElement;
 }
 
 function getLoginButton(): HTMLButtonElement {

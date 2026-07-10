@@ -9,10 +9,12 @@
 
     <!-- Office JavaScript API -->
     <script type="text/javascript" src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
+    <!-- Keep the send-critical event runtime independent from the task pane webpack bundle. -->
+    <!-- webpackIgnore: true -->
+    <script type="text/javascript" src="/public/classic-send-runtime.js"></script>
 </head>
 
 <body>
-  
 </body>
 
 </html>

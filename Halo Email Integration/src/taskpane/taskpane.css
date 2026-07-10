@@ -222,13 +222,6 @@ input:focus-visible {
   margin-bottom: 14px;
 }
 
-.halo-field {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.halo-field label,
 .halo-search__label {
   color: #3e475b;
   font-size: 11.5px;

@@ -117,6 +117,11 @@ async function invoke(app, method, path, request = {}) {
 
 function registerTestRoutes(app, store = createHaloStore({ dbPath: ":memory:" })) {
   registerHaloAuthRoutes(app, {
+    env: {
+      ...process.env,
+      HALO_CLIENT_ID: "test-client-id",
+      HALO_URL: "https://customer.halopsa.com/some/path",
+    },
     microsoftAuth: {
       clientId: "test-addin-client-id",
     },
@@ -146,7 +151,6 @@ async function loginAndGetCookie(app) {
   const start = await invoke(app, "POST", "/api/auth/start", {
     url: "/api/auth/start",
     headers: { authorization: TEST_AUTH_HEADER },
-    body: { haloUrl: "https://customer.halopsa.com", clientId: "test-client-id" },
   });
   assert.strictEqual(start.statusCode, 200, start.body && start.body.error);
   const dialogUrl = new URL(start.body.dialogUrl);
@@ -202,6 +206,31 @@ function createSendPayload(overrides = {}) {
 
 async function run() {
   assert.throws(
+    () =>
+      registerHaloAuthRoutes(createMockApp(), {
+        env: { ...process.env, HALO_CLIENT_ID: "test-client-id", HALO_URL: "" },
+      }),
+    /HALO_URL must be set/
+  );
+  assert.throws(
+    () =>
+      registerHaloAuthRoutes(createMockApp(), {
+        env: {
+          ...process.env,
+          HALO_CLIENT_ID: "test-client-id",
+          HALO_URL: "http://customer.halopsa.com",
+        },
+      }),
+    /HALO_URL must use https/
+  );
+  assert.throws(
+    () =>
+      registerHaloAuthRoutes(createMockApp(), {
+        env: { ...process.env, HALO_CLIENT_ID: "", HALO_URL: "https://customer.halopsa.com" },
+      }),
+    /HALO_CLIENT_ID must be set/
+  );
+  assert.throws(
     () => decodeEncryptionKey("", { NODE_ENV: "production" }),
     /HALO_TOKEN_ENCRYPTION_KEY/
   );
@@ -231,23 +260,8 @@ async function run() {
   const app = createMockApp();
   const store = registerTestRoutes(app);
 
-  const missingClientId = await invoke(app, "POST", "/api/auth/start", {
-    url: "/api/auth/start",
-    body: { haloUrl: "https://customer.halopsa.com" },
-  });
-  assert.strictEqual(missingClientId.statusCode, 400);
-  assert.match(missingClientId.body.error, /client ID/);
-
-  const invalidUrl = await invoke(app, "POST", "/api/auth/start", {
-    url: "/api/auth/start",
-    body: { haloUrl: "http://customer.halopsa.com", clientId: "test-client-id" },
-  });
-  assert.strictEqual(invalidUrl.statusCode, 400);
-  assert.match(invalidUrl.body.error, /https/);
-
   const start = await invoke(app, "POST", "/api/auth/start", {
     url: "/api/auth/start",
-    body: { haloUrl: "https://customer.halopsa.com/some/path", clientId: "test-client-id" },
   });
   assert.strictEqual(start.statusCode, 200);
   assert.match(start.body.dialogUrl, /^https:\/\/localhost:3000\/auth\/start\?state=/);
@@ -431,7 +445,6 @@ async function run() {
   try {
     const ticketsStart = await invoke(app, "POST", "/api/auth/start", {
       url: "/api/auth/start",
-      body: { haloUrl: "https://customer.halopsa.com", clientId: "test-client-id" },
     });
     const ticketsDialogUrl = new URL(ticketsStart.body.dialogUrl);
     const ticketsCallback = await invoke(app, "GET", "/auth/callback", {

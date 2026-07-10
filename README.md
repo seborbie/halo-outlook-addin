@@ -12,6 +12,8 @@ Required for local development and production:
 
 ```text
 HALO_TOKEN_ENCRYPTION_KEY=<32-byte base64/base64url key>
+HALO_URL=https://your-company.halopsa.com
+HALO_CLIENT_ID=<Halo API application client ID>
 ADDIN_CLIENT_ID=<Microsoft Entra app registration client ID>
 ```
 
@@ -83,7 +85,7 @@ https://your-addin-host.example.com/auth/callback
 6. Grant the application the Halo permissions needed to search tickets and create ticket actions/emails. The exact permission labels depend on your Halo configuration, but the add-in needs ticket read/search access and permission to add ticket actions.
 7. Copy the Halo API application client ID.
 
-The Halo client ID is public OAuth application metadata. The add-in does not ask for or use a Halo client secret. On first use, the task pane asks for the Halo URL, for example `https://your-company.halopsa.com`, and the Halo API application client ID.
+The Halo client ID is public OAuth application metadata. The add-in does not ask for or use a Halo client secret. Configure the tenant origin as `HALO_URL` and the Halo API application client ID as `HALO_CLIENT_ID`; users no longer enter either value in the task pane.
 
 ## Local Development
 
@@ -91,6 +93,8 @@ Set the required environment variables, then start the Office add-in dev server:
 
 ```powershell
 $env:HALO_TOKEN_ENCRYPTION_KEY="<generated key>"
+$env:HALO_URL="https://your-company.halopsa.com"
+$env:HALO_CLIENT_ID="<Halo API application client ID>"
 $env:ADDIN_CLIENT_ID="<Microsoft Entra application client ID>"
 cd ".\Halo Email Integration"
 npm run dev-server
@@ -102,7 +106,7 @@ The local Halo callback URL is:
 https://localhost:3000/auth/callback
 ```
 
-If you sideload the manifest into Outlook, the task pane will silently authenticate the Microsoft user, then prompt for Halo setup if that Microsoft user does not already have a stored Halo grant.
+If you sideload the manifest into Outlook, the task pane will silently authenticate the Microsoft user, then offer Halo sign-in if that Microsoft user does not already have a stored Halo grant.
 
 ## Production-Style Run
 
@@ -110,6 +114,8 @@ For an Azure-style build, set the public HTTPS origin and run the production ser
 
 ```powershell
 $env:HALO_TOKEN_ENCRYPTION_KEY="<generated key>"
+$env:HALO_URL="https://your-company.halopsa.com"
+$env:HALO_CLIENT_ID="<Halo API application client ID>"
 $env:ADDIN_CLIENT_ID="<Microsoft Entra application client ID>"
 $env:PUBLIC_BASE_URL="https://your-addin-host.example.com"
 cd ".\Halo Email Integration"
@@ -168,6 +174,8 @@ az webapp config appsettings set `
   --settings `
     WEBSITES_PORT=3000 `
     PORT=3000 `
+    HALO_URL="https://your-company.halopsa.com" `
+    HALO_CLIENT_ID="<Halo API application client ID>" `
     PUBLIC_BASE_URL="https://your-addin-host.example.com"
 
 az webapp update `

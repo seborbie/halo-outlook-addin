@@ -28,8 +28,12 @@ function registerHaloAuthRoutes(app, options = {}) {
     return;
   }
 
+  const env = options.env || process.env;
+  const haloUrl = normalizeHaloUrl(env.HALO_URL, "HALO_URL");
+  const clientId = normalizeClientId(env.HALO_CLIENT_ID, "HALO_CLIENT_ID");
+
   authStore = options.store || authStore || createHaloStore(options.storeOptions || {});
-  tokenCrypto = options.tokenCrypto || tokenCrypto || createTokenCrypto(options.env || process.env);
+  tokenCrypto = options.tokenCrypto || tokenCrypto || createTokenCrypto(env);
   microsoftAuthVerifier =
     options.microsoftAuthVerifier ||
     microsoftAuthVerifier ||
@@ -48,9 +52,6 @@ function registerHaloAuthRoutes(app, options = {}) {
 
   app.post("/api/auth/start", async (req, res) => {
     try {
-      const body = await readJsonBody(req);
-      const haloUrl = normalizeHaloUrl(body.haloUrl);
-      const clientId = normalizeClientId(body.clientId);
       const user = await requireMicrosoftUser(req);
       const state = randomBase64Url(32);
       const codeVerifier = randomBase64Url(64);
@@ -1626,28 +1627,28 @@ function sendAuthResultPage(res, payload) {
   );
 }
 
-function normalizeHaloUrl(value) {
+function normalizeHaloUrl(value, settingName = "Halo URL") {
   if (typeof value !== "string" || !value.trim()) {
-    throw new Error("Enter your Halo URL.");
+    throw new Error(`${settingName} must be set.`);
   }
 
   let url;
   try {
     url = new URL(value.trim());
   } catch (error) {
-    throw new Error("Enter a valid Halo URL, including https://.");
+    throw new Error(`${settingName} must be a valid URL, including https://.`);
   }
 
   if (url.protocol !== "https:") {
-    throw new Error("Halo URL must use https://.");
+    throw new Error(`${settingName} must use https://.`);
   }
 
   return url.origin;
 }
 
-function normalizeClientId(value) {
+function normalizeClientId(value, settingName = "Halo API application client ID") {
   if (typeof value !== "string" || !value.trim()) {
-    throw new Error("Enter your Halo API application client ID.");
+    throw new Error(`${settingName} must be set.`);
   }
 
   return value.trim();
