@@ -123,4 +123,59 @@ npm run serve
 https://your-addin-host.example.com/auth/callback
 ```
 
+Production builds require `PUBLIC_BASE_URL` and fail rather than emitting a manifest that points to localhost. The value must be the HTTPS origin only, with no path. HTTPS uses public port 443 by default, so the value normally doesn't need an explicit port.
+
+For a container image, pass the same origin as a Docker build argument because manifest and event-runtime URLs are generated while the image is built:
+
+```powershell
+cd ".\Halo Email Integration"
+docker build `
+  --build-arg PUBLIC_BASE_URL="https://your-addin-host.example.com" `
+  --tag halo-outlook-addin:2026.7.10-beta `
+  .
+```
+
+## GitHub Container Registry Publishing
+
+The `.github/workflows/publish-container.yml` workflow runs on every commit to `main` and can also be started manually. It verifies the application, builds the Linux container, and publishes these tags to GitHub Container Registry:
+
+```text
+ghcr.io/seborbie/halo-outlook-addin:2026.7.10-beta
+ghcr.io/seborbie/halo-outlook-addin:latest-beta
+ghcr.io/seborbie/halo-outlook-addin:sha-<commit>
+```
+
+Before the first run, open GitHub repository **Settings > Secrets and variables > Actions > Variables** and create this repository variable:
+
+```text
+PUBLIC_BASE_URL=https://your-addin-host.example.com
+```
+
+This is public build metadata rather than a secret. It must match the App Service HTTPS origin and must not contain a path. The workflow uses the repository `GITHUB_TOKEN`; no registry password or personal access token is required. If organization or repository policy restricts the token, allow GitHub Actions read/write workflow permissions so the job's `packages: write` permission can publish.
+
+The first GHCR package is private by default. After its first successful publication, open the package settings on GitHub and change its visibility to **Public** so Azure can pull it anonymously. GitHub doesn't allow a public package to be changed back to private.
+
+## Azure App Service Container Ports and HTTPS
+
+Azure App Service owns the public listeners on ports 80 and 443. Enable the App Service HTTPS-only setting so requests received on public HTTP port 80 are redirected to HTTPS port 443. TLS terminates at Azure's front end, and the Node container continues to listen on its internal HTTP port 3000; the container does not need to expose ports 80 or 443 or contain the public TLS certificate.
+
+Configure the App Service with the container port, the runtime public origin, and HTTPS-only mode:
+
+```powershell
+az webapp config appsettings set `
+  --resource-group "<resource-group>" `
+  --name "<app-name>" `
+  --settings `
+    WEBSITES_PORT=3000 `
+    PORT=3000 `
+    PUBLIC_BASE_URL="https://your-addin-host.example.com"
+
+az webapp update `
+  --resource-group "<resource-group>" `
+  --name "<app-name>" `
+  --https-only true
+```
+
+The build argument and the runtime `PUBLIC_BASE_URL` must match. Rebuild the image if the public hostname changes, then update the Microsoft Entra and Halo redirect URIs to use the same HTTPS origin.
+
 For Azure, mount or persist the SQLite database location if you need state to survive container replacement. Set `HALO_DB_PATH` to that mounted path when it differs from the default.

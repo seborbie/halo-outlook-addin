@@ -9,10 +9,35 @@ require("dotenv").config({ path: path.resolve(__dirname, ".env") });
 
 const { registerHaloAuthRoutes } = require("./server/haloAuth");
 
-const urlDev = "https://localhost:3000/";
-const urlProd = process.env.PUBLIC_BASE_URL
-  ? `${process.env.PUBLIC_BASE_URL.replace(/\/+$/, "")}/`
-  : urlDev;
+const urlDevOrigin = "https://localhost:3000";
+const urlDev = `${urlDevOrigin}/`;
+
+function getProductionBaseUrl(value) {
+  if (!value) {
+    throw new Error(
+      "PUBLIC_BASE_URL must be set to the deployed HTTPS origin for production builds."
+    );
+  }
+
+  let url;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new Error("PUBLIC_BASE_URL must be a valid absolute HTTPS URL.");
+  }
+
+  if (url.protocol !== "https:") {
+    throw new Error("PUBLIC_BASE_URL must use https://.");
+  }
+
+  if (url.username || url.password || url.pathname !== "/" || url.search || url.hash) {
+    throw new Error(
+      "PUBLIC_BASE_URL must contain only the HTTPS origin, without credentials or a path."
+    );
+  }
+
+  return `${url.origin}/`;
+}
 
 async function getHttpsOptions() {
   const httpsOptions = await devCerts.getHttpsServerOptions();
@@ -21,6 +46,8 @@ async function getHttpsOptions() {
 
 module.exports = async (env, options) => {
   const dev = options.mode === "development";
+  const publicBaseUrl = dev ? urlDev : getProductionBaseUrl(process.env.PUBLIC_BASE_URL);
+  const publicOrigin = publicBaseUrl.replace(/\/+$/, "");
   const config = {
     devtool: "source-map",
     entry: {
@@ -40,7 +67,7 @@ module.exports = async (env, options) => {
           test: /\.ts$/,
           exclude: /node_modules/,
           use: {
-            loader: "babel-loader"
+            loader: "babel-loader",
           },
         },
         {
@@ -73,10 +100,9 @@ module.exports = async (env, options) => {
             from: "src/commands/classic-send-runtime.js",
             to: "classic-send-runtime.js",
             transform(content) {
-              const runtimeBaseUrl = (dev ? urlDev : urlProd).replace(/\/+$/, "");
               return content
                 .toString()
-                .replace(new RegExp("__HALO_PUBLIC_BASE_URL__", "g"), runtimeBaseUrl);
+                .replace(new RegExp("__HALO_PUBLIC_BASE_URL__", "g"), publicOrigin);
             },
           },
           {
@@ -86,7 +112,7 @@ module.exports = async (env, options) => {
               if (dev) {
                 return content;
               } else {
-                return content.toString().replace(new RegExp(urlDev, "g"), urlProd);
+                return content.toString().split(urlDevOrigin).join(publicOrigin);
               }
             },
           },
@@ -116,7 +142,10 @@ module.exports = async (env, options) => {
       },
       server: {
         type: "https",
-        options: env.WEBPACK_BUILD || options.https !== undefined ? options.https : await getHttpsOptions(),
+        options:
+          env.WEBPACK_BUILD || options.https !== undefined
+            ? options.https
+            : await getHttpsOptions(),
       },
       port: 3000,
     },

@@ -6,6 +6,9 @@ COPY package*.json ./
 RUN npm ci
 
 COPY . .
+
+ARG PUBLIC_BASE_URL
+ENV PUBLIC_BASE_URL=${PUBLIC_BASE_URL}
 RUN npm run build
 
 ENV NODE_ENV=production
