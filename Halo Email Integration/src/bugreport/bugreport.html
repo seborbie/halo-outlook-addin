@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#f43f4d" />
+    <title>Report an Outlook add-in bug</title>
+    <link href="bugreport.css" rel="stylesheet" type="text/css" />
+  </head>
+  <body>
+    <header class="report-header">
+      <div class="report-header__inner">
+        <img src="../../assets/halopsa-logo.png" alt="HaloPSA" width="132" height="37" />
+        <span>Outlook add-in</span>
+      </div>
+    </header>
+
+    <main class="report-shell">
+      <section class="report-intro" aria-labelledby="report-title">
+        <p class="report-eyebrow">Product feedback</p>
+        <h1 id="report-title">Report a bug</h1>
+        <p>
+          Tell us what went wrong and how to reproduce it. Your report will be sent securely to
+          the add-in maintainers.
+        </p>
+      </section>
+
+      <section id="report-status" class="report-status" aria-live="polite" hidden></section>
+
+      <form id="bug-report-form" class="report-card">
+        <div class="report-field">
+          <div class="report-label-row">
+            <label for="summary">Summary <span aria-hidden="true">*</span></label>
+            <span id="summary-count">0 / 120</span>
+          </div>
+          <input
+            id="summary"
+            name="summary"
+            type="text"
+            maxlength="120"
+            autocomplete="off"
+            required
+            placeholder="A short description of the problem"
+          />
+        </div>
+
+        <div class="report-field">
+          <label for="description">What happened? <span aria-hidden="true">*</span></label>
+          <textarea
+            id="description"
+            name="description"
+            maxlength="5000"
+            rows="6"
+            required
+            placeholder="Describe the problem and what you were trying to do."
+          ></textarea>
+        </div>
+
+        <div class="report-field">
+          <label for="reproduction-steps">Steps to reproduce</label>
+          <textarea
+            id="reproduction-steps"
+            name="reproductionSteps"
+            maxlength="5000"
+            rows="5"
+            placeholder="1. Open an email&#10;2. Select…&#10;3. The add-in…"
+          ></textarea>
+        </div>
+
+        <div class="report-field">
+          <label for="expected-behavior">What did you expect?</label>
+          <textarea
+            id="expected-behavior"
+            name="expectedBehavior"
+            maxlength="5000"
+            rows="4"
+            placeholder="Describe what you expected the add-in to do."
+          ></textarea>
+        </div>
+
+        <div class="report-field">
+          <label for="additional-context">Additional context</label>
+          <textarea
+            id="additional-context"
+            name="additionalContext"
+            maxlength="5000"
+            rows="4"
+            placeholder="Include any other useful details."
+          ></textarea>
+        </div>
+
+        <aside class="report-privacy">
+          <strong>Included automatically</strong>
+          <p>
+            Your authenticated name and email, add-in version, Outlook host, platform and Office
+            version. Email subjects, recipients, bodies, attachments and Halo ticket data are
+            never collected.
+          </p>
+        </aside>
+
+        <div class="report-actions">
+          <button id="submit-button" type="submit">Submit bug report</button>
+          <p><span aria-hidden="true">*</span> Required fields</p>
+        </div>
+      </form>
+
+      <section id="report-success" class="report-card report-success" hidden>
+        <span class="report-success__icon" aria-hidden="true">✓</span>
+        <h2>Thank you — your report was submitted.</h2>
+        <p id="report-reference"></p>
+        <p>The add-in maintainers have been notified.</p>
+      </section>
+    </main>
+  </body>
+</html>

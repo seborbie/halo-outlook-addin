@@ -4,7 +4,10 @@ import {
   InteractionRequiredAuthError,
 } from "@azure/msal-browser";
 
+declare const __HALO_ADD_IN_VERSION__: string;
+
 const BACKGROUND_SESSION_STORAGE_KEY = "halo-auth-background-session-v1";
+const ADD_IN_VERSION = __HALO_ADD_IN_VERSION__;
 
 type AuthConfigResponse = {
   authority: string;
@@ -28,6 +31,11 @@ type AuthCompleteResponse = {
   authenticated: boolean;
   backgroundSessionId?: string;
   expiresAt?: string;
+};
+
+type BugReportSessionResponse = {
+  expiresAt: string;
+  url: string;
 };
 
 type AuthDialogMessage = {
@@ -142,6 +150,7 @@ function showApp() {
 function bindControls() {
   getLoginButton().onclick = startHaloLogin;
   getLogoutButton().onclick = logout;
+  getReportBugButton().onclick = () => void openBugReport();
   getRefreshTicketsButton().onclick = () => void loadTickets();
   getTicketSearchForm().onsubmit = (event) => {
     event.preventDefault();
@@ -149,6 +158,37 @@ function bindControls() {
   };
   getClearSearchButton().onclick = clearSearchResults;
   registerItemChangedHandler();
+}
+
+async function openBugReport() {
+  const button = getReportBugButton();
+  button.disabled = true;
+
+  try {
+    const diagnostics = Office.context.diagnostics;
+    const mailboxDiagnostics = Office.context.mailbox.diagnostics;
+    const session = await fetchJson<BugReportSessionResponse>("/api/bug-reports/session", {
+      body: JSON.stringify({
+        diagnostics: {
+          addInVersion: ADD_IN_VERSION,
+          officeVersion: diagnostics.version || mailboxDiagnostics.hostVersion || "",
+          outlookHost: String(diagnostics.host || mailboxDiagnostics.hostName || "Outlook"),
+          outlookPlatform: String(diagnostics.platform || ""),
+        },
+      }),
+      method: "POST",
+    });
+
+    Office.context.ui.openBrowserWindow(session.url);
+  } catch (error) {
+    setStatus(
+      "failed",
+      "Could not open bug reporting",
+      error instanceof Error ? error.message : "Bug reporting is temporarily unavailable."
+    );
+  } finally {
+    button.disabled = false;
+  }
 }
 
 async function checkExistingSession() {
@@ -1193,6 +1233,10 @@ function getLoginButton(): HTMLButtonElement {
 
 function getLogoutButton(): HTMLButtonElement {
   return document.getElementById("logout-button") as HTMLButtonElement;
+}
+
+function getReportBugButton(): HTMLButtonElement {
+  return document.getElementById("report-bug-button") as HTMLButtonElement;
 }
 
 function getRefreshTicketsButton(): HTMLButtonElement {

@@ -12,8 +12,11 @@ function createHaloStore(options = {}) {
 
   return {
     cleanExpired,
+    claimBugReportSession,
     close,
+    consumeBugReportSession,
     createBackgroundSession,
+    createBugReportSession,
     createSession,
     deleteBackgroundSessionsForSessionHash,
     deleteSession,
@@ -25,6 +28,7 @@ function createHaloStore(options = {}) {
     getSessionWithGrant,
     invalidateGrantById,
     invalidateGrantForUser,
+    releaseBugReportSession,
     saveConversationMapping,
     saveHaloGrant,
     saveMessageMapping,
@@ -117,6 +121,77 @@ function createHaloStore(options = {}) {
          expires_at = excluded.expires_at,
          updated_at = excluded.updated_at`
     ).run(sessionHash, userId, expiresAt, now, now);
+  }
+
+  function createBugReportSession({ diagnostics, expiresAt, sessionHash, userId }) {
+    const now = Date.now();
+    db.prepare(
+      `INSERT INTO bug_report_sessions
+         (session_hash, user_id, diagnostics_json, expires_at, claimed_at, consumed_at, created_at)
+       VALUES (?, ?, ?, ?, NULL, NULL, ?)`
+    ).run(sessionHash, userId, JSON.stringify(diagnostics || {}), expiresAt, now);
+  }
+
+  function claimBugReportSession(sessionHash, now = Date.now()) {
+    const transaction = db.transaction(() => {
+      const result = db
+        .prepare(
+          `UPDATE bug_report_sessions
+           SET claimed_at = ?
+           WHERE session_hash = ?
+             AND expires_at > ?
+             AND consumed_at IS NULL
+             AND claimed_at IS NULL`
+        )
+        .run(now, sessionHash, now);
+
+      if (!result.changes) {
+        return null;
+      }
+
+      return db
+        .prepare(
+          `SELECT brs.session_hash AS sessionHash, brs.user_id AS userId,
+                  brs.diagnostics_json AS diagnosticsJson, brs.expires_at AS expiresAt,
+                  u.email, u.display_name AS displayName
+           FROM bug_report_sessions brs
+           JOIN users u ON u.id = brs.user_id
+           WHERE brs.session_hash = ?`
+        )
+        .get(sessionHash);
+    });
+
+    const row = transaction();
+    if (!row) {
+      return null;
+    }
+
+    return {
+      diagnostics: JSON.parse(row.diagnosticsJson || "{}"),
+      displayName: row.displayName || "",
+      email: row.email || "",
+      expiresAt: row.expiresAt,
+      sessionHash: row.sessionHash,
+      userId: row.userId,
+    };
+  }
+
+  function releaseBugReportSession(sessionHash) {
+    db.prepare(
+      `UPDATE bug_report_sessions
+       SET claimed_at = NULL
+       WHERE session_hash = ? AND consumed_at IS NULL`
+    ).run(sessionHash);
+  }
+
+  function consumeBugReportSession(sessionHash, now = Date.now()) {
+    return db
+      .prepare(
+        `UPDATE bug_report_sessions
+         SET claimed_at = NULL, consumed_at = ?
+         WHERE session_hash = ? AND consumed_at IS NULL`
+      )
+      .run(now, sessionHash).changes;
   }
 
   function getSessionWithGrant(sessionHash) {
@@ -256,6 +331,7 @@ function createHaloStore(options = {}) {
   }
 
   function cleanExpired(now = Date.now()) {
+    db.prepare("DELETE FROM bug_report_sessions WHERE expires_at <= ?").run(now);
     db.prepare("DELETE FROM background_sessions WHERE expires_at <= ?").run(now);
     db.prepare("DELETE FROM sessions WHERE expires_at <= ?").run(now);
   }
@@ -381,6 +457,17 @@ function initializeSchema(db) {
       FOREIGN KEY (session_hash) REFERENCES sessions(session_hash) ON DELETE CASCADE
     );
 
+    CREATE TABLE IF NOT EXISTS bug_report_sessions (
+      session_hash TEXT PRIMARY KEY,
+      user_id INTEGER NOT NULL,
+      diagnostics_json TEXT NOT NULL DEFAULT '{}',
+      expires_at INTEGER NOT NULL,
+      claimed_at INTEGER,
+      consumed_at INTEGER,
+      created_at INTEGER NOT NULL,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+
     CREATE TABLE IF NOT EXISTS conversation_mappings (
       id TEXT PRIMARY KEY,
       mailbox_email TEXT NOT NULL,
@@ -404,6 +491,8 @@ function initializeSchema(db) {
     CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id);
     CREATE INDEX IF NOT EXISTS idx_sessions_expires_at ON sessions(expires_at);
     CREATE INDEX IF NOT EXISTS idx_background_sessions_expires_at ON background_sessions(expires_at);
+    CREATE INDEX IF NOT EXISTS idx_bug_report_sessions_expires_at
+      ON bug_report_sessions(expires_at);
     CREATE INDEX IF NOT EXISTS idx_conversation_mappings_conversation
       ON conversation_mappings(mailbox_email, conversation_id);
     CREATE INDEX IF NOT EXISTS idx_message_mappings_mapping_id ON message_mappings(mapping_id);

@@ -708,6 +708,25 @@ input:focus-visible {
   text-align: center;
 }
 
+.halo-footer-button {
+  border: 0;
+  padding: 0;
+  color: var(--halo-red-dark);
+  background: transparent;
+  font: inherit;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.halo-footer-button:hover:not(:disabled) {
+  text-decoration: underline;
+}
+
+.halo-footer-button:disabled {
+  cursor: wait;
+  opacity: 0.58;
+}
+
 @media (max-width: 310px) {
   .halo-app {
     padding-right: 10px;

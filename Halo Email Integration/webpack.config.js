@@ -4,10 +4,13 @@ const devCerts = require("office-addin-dev-certs");
 const CopyWebpackPlugin = require("copy-webpack-plugin");
 const HtmlWebpackPlugin = require("html-webpack-plugin");
 const path = require("path");
+const webpack = require("webpack");
+const packageInfo = require("./package.json");
 
 require("dotenv").config({ path: path.resolve(__dirname, ".env") });
 
 const { registerHaloAuthRoutes } = require("./server/haloAuth");
+const { registerStatusRoute } = require("./server/statusRoute");
 
 const urlDevOrigin = "https://localhost:3000";
 const urlDev = `${urlDevOrigin}/`;
@@ -51,6 +54,7 @@ module.exports = async (env, options) => {
   const config = {
     devtool: "source-map",
     entry: {
+      bugreport: "./src/bugreport/bugreport.ts",
       polyfill: ["core-js/stable", "regenerator-runtime/runtime"],
       taskpane: ["./src/taskpane/taskpane.ts", "./src/taskpane/taskpane.html"],
     },
@@ -84,6 +88,14 @@ module.exports = async (env, options) => {
       ],
     },
     plugins: [
+      new webpack.DefinePlugin({
+        __HALO_ADD_IN_VERSION__: JSON.stringify(packageInfo.version),
+      }),
+      new HtmlWebpackPlugin({
+        filename: "bugreport.html",
+        template: "./src/bugreport/bugreport.html",
+        chunks: ["bugreport"],
+      }),
       new HtmlWebpackPlugin({
         filename: "taskpane.html",
         template: "./src/taskpane/taskpane.html",
@@ -132,12 +144,16 @@ module.exports = async (env, options) => {
         directory: path.join(__dirname, "dist"),
         publicPath: "/public",
       },
+      historyApiFallback: {
+        rewrites: [{ from: /^\/bugreport\/?$/, to: "/bugreport.html" }],
+      },
       setupMiddlewares: (middlewares, devServer) => {
         if (!devServer || !devServer.app) {
           throw new Error("webpack-dev-server is not available for Halo auth routes.");
         }
 
         registerHaloAuthRoutes(devServer.app);
+        registerStatusRoute(devServer.app);
         return middlewares;
       },
       server: {

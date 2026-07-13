@@ -1,4 +1,5 @@
 const crypto = require("crypto");
+const { registerBugReportRoutes } = require("./bugReports");
 const { createHaloStore } = require("./haloStore");
 const { createMicrosoftAuthVerifier, getMicrosoftAuthConfig } = require("./microsoftAuth");
 const { createTokenCrypto } = require("./tokenCrypto");
@@ -586,6 +587,13 @@ function registerHaloAuthRoutes(app, options = {}) {
 
     res.setHeader("Set-Cookie", clearSessionCookie());
     sendJson(res, 200, { authenticated: false });
+  });
+
+  registerBugReportRoutes(app, {
+    env,
+    githubClient: options.githubClient,
+    requireMicrosoftUser,
+    store: authStore,
   });
 }
 
