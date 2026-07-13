@@ -110,14 +110,9 @@ function getBugReportConfig(env = process.env) {
     Number.isFinite(requestedTtl) && requestedTtl > 0
       ? Math.min(requestedTtl, MAX_SESSION_TTL_MINUTES)
       : DEFAULT_SESSION_TTL_MINUTES;
-  const labels = String(env.BUG_REPORT_GITHUB_LABELS || "bug,outlook-addin")
-    .split(",")
-    .map((label) => label.trim())
-    .filter(Boolean);
-
   return {
     configured: Boolean(repositoryMatch && token),
-    labels,
+    labels: ["bug"],
     owner: repositoryMatch ? repositoryMatch[1] : "",
     repo: repositoryMatch ? repositoryMatch[2] : "",
     repository,
@@ -258,10 +253,6 @@ function buildIssueBody(report, session, now = new Date()) {
     "## Additional context",
     safeMarkdown(report.additionalContext || "Not provided."),
     "",
-    "## Reporter",
-    `- Name: ${safeInlineMarkdown(session.displayName || "Not provided")}`,
-    `- Email: ${inlineCode(session.email || "Not provided")}`,
-    "",
     "## Safe diagnostics",
     `- Add-in version: ${inlineCode(diagnostics.addInVersion || "Unknown")}`,
     `- Outlook host: ${inlineCode(diagnostics.outlookHost || "Unknown")}`,
@@ -269,19 +260,12 @@ function buildIssueBody(report, session, now = new Date()) {
     `- Office version: ${inlineCode(diagnostics.officeVersion || "Unknown")}`,
     `- Submitted: ${now.toISOString()}`,
     "",
-    "_No email subject, recipients, body, attachments, or Halo ticket data were collected._",
+    "_Reporter name and email, mailbox contents, attachments, and Halo ticket data were not included in this report._",
   ].join("\n");
 }
 
 function safeMarkdown(value) {
   return preventMentions(String(value || "")).replace(/([\\`*_{}\[\]<>#|])/g, "\\$1");
-}
-
-function safeInlineMarkdown(value) {
-  return preventMentions(stripControlCharacters(value)).replace(
-    /([\\`*_{}\[\]()<>#+!|])/g,
-    "\\$1"
-  );
 }
 
 function inlineCode(value) {

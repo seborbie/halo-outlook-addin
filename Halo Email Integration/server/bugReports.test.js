@@ -90,7 +90,7 @@ function tokenFromSessionResponse(response) {
   return new URLSearchParams(url.hash.slice(1)).get("token");
 }
 
-test("authenticated add-in users can submit one private GitHub issue", async () => {
+test("authenticated add-in users can submit one identity-redacted GitHub issue", async () => {
   const { app, issues, store } = createHarness();
   const sessionResponse = await invoke(app, "/api/bug-reports/session", {
     body: {
@@ -125,9 +125,11 @@ test("authenticated add-in users can submit one private GitHub issue", async () 
   assert.deepEqual(submitResponse.body, { ok: true, reference: 42 });
   assert.equal(issues.length, 1);
   assert.equal(issues[0].title, "[Add-in bug] Add-in does not load");
-  assert.deepEqual(issues[0].labels, ["bug", "outlook-addin"]);
-  assert.match(issues[0].body, /Support User/);
-  assert.match(issues[0].body, /support@example\.com/);
+  assert.deepEqual(issues[0].labels, ["bug"]);
+  assert.doesNotMatch(issues[0].body, /Support User/);
+  assert.doesNotMatch(issues[0].body, /support@example\.com/);
+  assert.doesNotMatch(issues[0].body, /## Reporter/);
+  assert.match(issues[0].body, /Reporter name and email.*were not included/);
   assert.match(issues[0].body, /2026\.7\.10-beta/);
   assert.doesNotMatch(issues[0].body, /must not be collected/);
   assert.doesNotMatch(issues[0].body, /\u0000/);

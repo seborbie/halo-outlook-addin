@@ -34,9 +34,8 @@ ADDIN_AUTH_SCOPES=api://<Microsoft Entra app client ID>/access_as_user
 ADDIN_REQUIRED_SCOPE=access_as_user
 PUBLIC_BASE_URL=https://your-addin-host.example.com
 PORT=3000
-BUG_REPORT_GITHUB_REPOSITORY=owner/private-bug-report-repository
+BUG_REPORT_GITHUB_REPOSITORY=seborbie/halo-outlook-addin
 BUG_REPORT_GITHUB_TOKEN=<fine-grained GitHub token>
-BUG_REPORT_GITHUB_LABELS=bug,outlook-addin
 BUG_REPORT_SESSION_TTL_MINUTES=15
 ```
 
@@ -44,22 +43,24 @@ BUG_REPORT_SESSION_TTL_MINUTES=15
 
 `HALO_DB_PATH` defaults to `./data/halo.sqlite` relative to the process working directory. When running from `Halo Email Integration`, the default database path is `Halo Email Integration/data/halo.sqlite`.
 
-The bug-report settings are optional. Without them, the add-in continues to run and the report button displays a temporary-unavailability message. `BUG_REPORT_GITHUB_LABELS` defaults to `bug,outlook-addin`, and the report-session lifetime defaults to 15 minutes with a maximum of 60 minutes.
+The bug-report settings are optional. Without them, the add-in continues to run and the report button displays a temporary-unavailability message. Reports always use the `bug` label, and the report-session lifetime defaults to 15 minutes with a maximum of 60 minutes.
 
-## Private GitHub Bug Reporting
+## GitHub Bug Reporting
 
-The task pane's **Report a bug** button creates a short-lived, single-use report link and opens `/bugreport` in the user's external browser. Completed reports are stored only as issues in a dedicated private GitHub repository; SQLite stores only hashed temporary session identifiers until they expire.
+The task pane's **Report a bug** button creates a short-lived, single-use report link and opens `/bugreport` in the user's external browser. Completed reports are stored as issues in the configured GitHub repository; SQLite stores only hashed temporary session identifiers until they expire.
 
-Set up the private report dashboard as follows:
+Set up the report dashboard as follows:
 
-1. Create a private GitHub repository for add-in bug reports and enable Issues.
-2. Add labels named `bug` and `outlook-addin` (or override `BUG_REPORT_GITHUB_LABELS`).
-3. Create a fine-grained personal access token with access only to that repository and grant **Issues: Read and write**. No Contents permission is required.
-4. Store the token as the Azure App Service secret `BUG_REPORT_GITHUB_TOKEN`, and set `BUG_REPORT_GITHUB_REPOSITORY` to `owner/repository`.
+1. Enable Issues on the repository that will receive reports. For this project, set `BUG_REPORT_GITHUB_REPOSITORY=seborbie/halo-outlook-addin`.
+2. Ensure the `bug` label exists.
+3. Create a fine-grained personal access token with access only to the report repository and grant **Issues: Read and write**. No Contents permission is required.
+4. Store the token as the Azure App Service secret `BUG_REPORT_GITHUB_TOKEN`.
 5. In the report repository, choose **Watch > Custom > Issues**. In GitHub notification settings, enable **Email** and **On GitHub** delivery so new issues notify the maintainers.
 6. Rotate the fine-grained token before its configured expiry and update the Azure secret without rebuilding the container.
 
-Each issue contains the authenticated user's name and email, the add-in version, Outlook host/platform, Office version, and the form contents. The add-in never includes the open email's subject, recipients, body, attachments, or Halo ticket data. Keep the report repository private because issues contain reporter identity and diagnostic context.
+Each issue contains the add-in version, Outlook host/platform, Office version, and the form contents. The authenticated user's name and email are not included. The add-in also excludes mailbox contents, attachments, and Halo ticket data.
+
+The configured repository may be public. Anything a user types into the form will be visible wherever the resulting GitHub issue is visible, so users must not enter names, email addresses, customer data, credentials, or other sensitive information.
 
 The public `/bugreport` page cannot submit by itself. `POST /api/bug-reports/session` requires the existing Microsoft add-in bearer token, and `POST /api/bug-reports` requires the resulting single-use session token. A failed GitHub request releases the session so the user can retry; a successful request consumes it to prevent duplicate submissions.
 
@@ -210,7 +211,7 @@ az webapp config appsettings set `
     PORT=3000 `
     HALO_URL="https://your-company.halopsa.com" `
     HALO_CLIENT_ID="<Halo API application client ID>" `
-    BUG_REPORT_GITHUB_REPOSITORY="owner/private-bug-report-repository" `
+    BUG_REPORT_GITHUB_REPOSITORY="seborbie/halo-outlook-addin" `
     BUG_REPORT_GITHUB_TOKEN="<fine-grained GitHub token>" `
     PUBLIC_BASE_URL="https://your-addin-host.example.com"
 

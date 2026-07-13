@@ -152,10 +152,8 @@ function createHaloStore(options = {}) {
       return db
         .prepare(
           `SELECT brs.session_hash AS sessionHash, brs.user_id AS userId,
-                  brs.diagnostics_json AS diagnosticsJson, brs.expires_at AS expiresAt,
-                  u.email, u.display_name AS displayName
+                  brs.diagnostics_json AS diagnosticsJson, brs.expires_at AS expiresAt
            FROM bug_report_sessions brs
-           JOIN users u ON u.id = brs.user_id
            WHERE brs.session_hash = ?`
         )
         .get(sessionHash);
@@ -168,8 +166,6 @@ function createHaloStore(options = {}) {
 
     return {
       diagnostics: JSON.parse(row.diagnosticsJson || "{}"),
-      displayName: row.displayName || "",
-      email: row.email || "",
       expiresAt: row.expiresAt,
       sessionHash: row.sessionHash,
       userId: row.userId,
