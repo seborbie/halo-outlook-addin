@@ -121,6 +121,7 @@ type HaloAuthError = Error & {
 };
 
 let currentDialog: Office.Dialog | null = null;
+let bugReportDialog: Office.Dialog | null = null;
 let waitingForDialog = false;
 let checkingSession = false;
 let authConfigPromise: Promise<AuthConfigResponse> | null = null;
@@ -179,7 +180,7 @@ async function openBugReport() {
       method: "POST",
     });
 
-    Office.context.ui.openBrowserWindow(session.url);
+    await openBugReportPage(session.url);
   } catch (error) {
     setStatus(
       "failed",
@@ -188,6 +189,59 @@ async function openBugReport() {
     );
   } finally {
     button.disabled = false;
+  }
+}
+
+function openBugReportPage(url: string): Promise<void> {
+  const openBrowserWindow = Office.context.ui.openBrowserWindow;
+
+  if (typeof openBrowserWindow === "function") {
+    try {
+      openBrowserWindow.call(Office.context.ui, url);
+      return Promise.resolve();
+    } catch {
+      // Some Outlook hosts expose the API without supporting it at runtime.
+    }
+  }
+
+  return openBugReportDialog(url);
+}
+
+function openBugReportDialog(url: string): Promise<void> {
+  closeBugReportDialog();
+
+  return new Promise((resolve, reject) => {
+    Office.context.ui.displayDialogAsync(
+      url,
+      { height: 80, width: 60, displayInIframe: false },
+      (asyncResult) => {
+        if (asyncResult.status === Office.AsyncResultStatus.Failed) {
+          const message =
+            asyncResult.error.code === 12009
+              ? "Allow the bug report dialog when Outlook prompts you, then try again."
+              : asyncResult.error.message || "Could not open the bug report window.";
+          reject(new Error(message));
+          return;
+        }
+
+        const dialog = asyncResult.value;
+        bugReportDialog = dialog;
+        dialog.addEventHandler(Office.EventType.DialogEventReceived, () => {
+          if (bugReportDialog === dialog) {
+            bugReportDialog = null;
+          }
+        });
+        resolve();
+      }
+    );
+  });
+}
+
+function closeBugReportDialog() {
+  const dialog = bugReportDialog;
+  bugReportDialog = null;
+  if (dialog) {
+    dialog.close();
   }
 }
 
@@ -243,6 +297,8 @@ async function startHaloLogin() {
 }
 
 function openHaloDialog(dialogUrl: string) {
+  closeBugReportDialog();
+
   if (currentDialog) {
     currentDialog.close();
     currentDialog = null;
@@ -756,6 +812,7 @@ function setStatus(
 function setBusy(isBusy: boolean) {
   getLoginButton().disabled = isBusy;
   getLogoutButton().disabled = isBusy;
+  getReportBugButton().disabled = isBusy;
   getRefreshTicketsButton().disabled = isBusy;
   getSearchTicketsButton().disabled = isBusy;
   getClearSearchButton().disabled = isBusy;

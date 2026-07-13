@@ -47,7 +47,7 @@ The bug-report settings are optional. Without them, the add-in continues to run 
 
 ## GitHub Bug Reporting
 
-The task pane's **Report a bug** button creates a short-lived, single-use report link and opens `/bugreport` in the user's external browser. Completed reports are stored as issues in the configured GitHub repository; SQLite stores only hashed temporary session identifiers until they expire.
+The task pane's **Report a bug** button creates a short-lived, single-use report link and opens `/bugreport`. Classic Outlook uses the external browser API. New Outlook and Outlook on the web, which do not support that API, automatically use an Office dialog instead. Completed reports are stored as issues in the configured GitHub repository; SQLite stores only hashed temporary session identifiers until they expire.
 
 Set up the report dashboard as follows:
 
