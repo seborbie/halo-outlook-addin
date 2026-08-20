@@ -14,6 +14,7 @@ env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
   APP_DIRECTORY: Halo Email Integration
+  DATABASE_URL: postgresql://inboxlink:inboxlink@127.0.0.1:5432/inboxlink
 
 jobs:
   build-and-publish:
@@ -24,6 +25,18 @@ jobs:
       packages: write
       attestations: write
       id-token: write
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
 
     steps:
       - name: Check out repository
@@ -46,6 +59,23 @@ jobs:
           cache: npm
           cache-dependency-path: ${{ env.APP_DIRECTORY }}/package-lock.json
 
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+
+      - name: Create non-superuser test database role
+        shell: bash
+        run: |
+          docker exec "${{ job.services.postgres.id }}" psql -U postgres -c "CREATE ROLE inboxlink LOGIN PASSWORD 'inboxlink' NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT;"
+          docker exec "${{ job.services.postgres.id }}" psql -U postgres -c "CREATE DATABASE inboxlink OWNER inboxlink;"
+
+      - name: Install and verify website
+        run: |
+          bun install --frozen-lockfile
+          bun run check
+          bun run build:web
+
       - name: Install dependencies
         working-directory: ${{ env.APP_DIRECTORY }}
         run: npm ci
@@ -56,7 +86,12 @@ jobs:
 
       - name: Run authentication tests
         working-directory: ${{ env.APP_DIRECTORY }}
-        run: npm run test:auth
+        run: |
+          npm run migrate
+          npm run test:auth
+          npm run test:bug-reports
+          npm run test:tenancy
+          npm run test:status-route
 
       - name: Run send runtime tests
         working-directory: ${{ env.APP_DIRECTORY }}
@@ -115,7 +150,7 @@ jobs:
         id: push
         uses: docker/build-push-action@f2a1d5e99d037542a71f64918e516c093c6f3fc4
         with:
-          context: ./${{ env.APP_DIRECTORY }}
+          context: .
           file: ./${{ env.APP_DIRECTORY }}/Dockerfile
           platforms: linux/amd64
           push: true

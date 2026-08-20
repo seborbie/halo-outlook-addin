@@ -2,10 +2,7 @@ const assert = require("assert");
 process.env.NODE_ENV = "test";
 process.env.HALO_TOKEN_ENCRYPTION_KEY = Buffer.alloc(32, 3).toString("base64url");
 
-const fs = require("fs");
 const crypto = require("crypto");
-const os = require("os");
-const path = require("path");
 const { registerHaloAuthRoutes } = require("./haloAuth");
 const { createHaloStore } = require("./haloStore");
 const {
@@ -121,13 +118,9 @@ async function invoke(app, method, path, request = {}) {
   return response;
 }
 
-function registerTestRoutes(app, store = createHaloStore({ dbPath: ":memory:" })) {
+function registerTestRoutes(app, store = createHaloStore()) {
   registerHaloAuthRoutes(app, {
-    env: {
-      ...process.env,
-      HALO_CLIENT_ID: "test-client-id",
-      HALO_URL: "https://customer.halopsa.com/some/path",
-    },
+    env: process.env,
     microsoftAuth: {
       clientId: "test-addin-client-id",
     },
@@ -135,11 +128,6 @@ function registerTestRoutes(app, store = createHaloStore({ dbPath: ":memory:" })
     store,
   });
   return store;
-}
-
-function createTempDbPath(name) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "halo-auth-test-"));
-  return path.join(dir, `${name}.sqlite`);
 }
 
 function getCookieValue(cookieHeader, name) {
@@ -211,6 +199,11 @@ function createSendPayload(overrides = {}) {
 }
 
 async function run() {
+  const resetStore = createHaloStore();
+  await resetStore.ready;
+  await resetStore.resetForTests();
+  await resetStore.close();
+
   assert.strictEqual(getApiAudience("test-client-id"), "api://test-client-id");
   assert.deepStrictEqual(getTokenAudiences("test-client-id", "api://test-client-id"), [
     "test-client-id",
@@ -244,31 +237,6 @@ async function run() {
     /access_as_user scope/
   );
   assert.throws(
-    () =>
-      registerHaloAuthRoutes(createMockApp(), {
-        env: { ...process.env, HALO_CLIENT_ID: "test-client-id", HALO_URL: "" },
-      }),
-    /HALO_URL must be set/
-  );
-  assert.throws(
-    () =>
-      registerHaloAuthRoutes(createMockApp(), {
-        env: {
-          ...process.env,
-          HALO_CLIENT_ID: "test-client-id",
-          HALO_URL: "http://customer.halopsa.com",
-        },
-      }),
-    /HALO_URL must use https/
-  );
-  assert.throws(
-    () =>
-      registerHaloAuthRoutes(createMockApp(), {
-        env: { ...process.env, HALO_CLIENT_ID: "", HALO_URL: "https://customer.halopsa.com" },
-      }),
-    /HALO_CLIENT_ID must be set/
-  );
-  assert.throws(
     () => decodeEncryptionKey("", { NODE_ENV: "production" }),
     /HALO_TOKEN_ENCRYPTION_KEY/
   );
@@ -277,16 +245,27 @@ async function run() {
     /exactly 32 bytes/
   );
 
-  const schemaStore = createHaloStore({ dbPath: ":memory:" });
-  const schemaUser = schemaStore.upsertUser({
+  const schemaStore = createHaloStore();
+  await schemaStore.registerOrganisation({
+    companyName: "Schema Company",
+    haloClientId: "schema-client-id",
+    haloUrl: "https://schema.halopsa.com",
+    microsoftTenantId: "schema-tenant-id",
+    owner: {
+      displayName: "Schema Owner",
+      email: "owner@schema.example",
+      objectId: "schema-owner-id",
+    },
+  });
+  const schemaUser = await schemaStore.upsertUser({
     objectId: "schema-object-id",
     tenantId: "schema-tenant-id",
   });
   assert(schemaUser.id);
-  schemaStore.close();
+  await schemaStore.close();
 
   const invalidAuthApp = createMockApp();
-  registerTestRoutes(invalidAuthApp);
+  const invalidAuthStore = registerTestRoutes(invalidAuthApp);
   const invalidAuthStatus = await invoke(invalidAuthApp, "GET", "/api/auth/status", {
     url: "/api/auth/status",
     headers: { authorization: "Bearer invalid-token" },
@@ -297,6 +276,23 @@ async function run() {
 
   const app = createMockApp();
   const store = registerTestRoutes(app);
+
+  const unconfiguredStart = await invoke(app, "POST", "/api/auth/start", {
+    url: "/api/auth/start",
+  });
+  assert.strictEqual(unconfiguredStart.statusCode, 403);
+  assert.match(unconfiguredStart.body.error, /has not been configured/i);
+
+  const signup = await invoke(app, "POST", "/api/organisations/register", {
+    url: "/api/organisations/register",
+    body: {
+      companyName: "Test Customer",
+      haloClientId: "test-client-id",
+      haloUrl: "https://customer.halopsa.com/some/path",
+      workEmail: "support@example.com",
+    },
+  });
+  assert.strictEqual(signup.statusCode, 201, signup.body && signup.body.error);
 
   const start = await invoke(app, "POST", "/api/auth/start", {
     url: "/api/auth/start",
@@ -856,11 +852,13 @@ async function run() {
     assert.strictEqual(sentConversationAttach.body.status, "attached");
     assert.strictEqual(attachActionFetchCount, 8);
 
-    const expiredBackgroundSessionId = "expired-background-session-id";
-    store.createBackgroundSession({
+    const organisationId = attach.body.backgroundSessionId.split(".")[0];
+    const expiredBackgroundSessionId = `${organisationId}.expired-background-session-id`;
+    await store.createBackgroundSession({
       backgroundSessionHash: sha256Hex(expiredBackgroundSessionId),
       sessionHash: sha256Hex(getCookieValue(attachCookie, "halo_session")),
       expiresAt: Date.now() - 1000,
+      organisationId,
     });
     const expiredBackgroundAttach = await invoke(app, "POST", "/api/halo/email/send-auto-attach", {
       url: "/api/halo/email/send-auto-attach",
@@ -1087,8 +1085,10 @@ async function run() {
     global.fetch = originalFetch;
   }
 
-  const persistentDbPath = createTempDbPath("persistent-auth");
-  const persistentStore = createHaloStore({ dbPath: persistentDbPath });
+  await invalidAuthStore.close();
+  await store.close();
+
+  const persistentStore = createHaloStore();
   const persistentApp = createMockApp();
   registerTestRoutes(persistentApp, persistentStore);
 
@@ -1135,10 +1135,10 @@ async function run() {
     assert.strictEqual(persistentActionFetchCount, 1);
   } finally {
     global.fetch = originalFetch;
-    persistentStore.close();
+    await persistentStore.close();
   }
 
-  const restartedStore = createHaloStore({ dbPath: persistentDbPath });
+  const restartedStore = createHaloStore();
   const restartedApp = createMockApp();
   registerTestRoutes(restartedApp, restartedStore);
 
@@ -1169,7 +1169,7 @@ async function run() {
     assert.strictEqual(restartedAlreadyAttached.body.status, "already-attached");
     assert.strictEqual(restartedAlreadyAttached.body.ticketNumber, "T1001");
   } finally {
-    restartedStore.close();
+    await restartedStore.close();
   }
 }
 

@@ -1,0 +1,10 @@
+.git
+.github
+node_modules
+**/node_modules
+**/.svelte-kit
+**/build
+**/dist
+**/.env
+**/data
+coverage

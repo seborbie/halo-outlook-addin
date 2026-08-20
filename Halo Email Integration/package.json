@@ -29,16 +29,19 @@
     "test:send-runtime": "node server/classicSendRuntime.test.js",
     "test:send-runtime:built": "node server/classicSendRuntime.test.js dist/classic-send-runtime.js",
     "test:status-route": "node server/statusRoute.test.js",
+    "test:tenancy": "node server/tenantIsolation.test.js",
+    "migrate": "node server/migrate.js",
+    "migrate:sqlite": "node server/migrateSqliteToPostgres.js",
     "validate": "office-addin-manifest validate manifest.xml",
     "watch": "webpack --mode development --watch"
   },
   "dependencies": {
     "@azure/msal-browser": "^5.17.0",
-    "better-sqlite3": "^12.11.1",
     "core-js": "^3.36.0",
     "dotenv": "^8.6.0",
     "express": "^5.2.1",
     "jose": "^6.2.3",
+    "pg": "^8.16.3",
     "regenerator-runtime": "^0.14.1"
   },
   "devDependencies": {

@@ -30,12 +30,13 @@ function registerBugReportRoutes(app, options = {}) {
       requireConfigured(config);
       const user = await requireMicrosoftUser(req);
       const diagnostics = normalizeDiagnostics(req.body && req.body.diagnostics);
-      const sessionToken = crypto.randomBytes(32).toString("base64url");
+      const sessionToken = createTenantSessionToken(user.organisationId);
       const expiresAt = Date.now() + config.sessionTtlMinutes * 60 * 1000;
 
-      store.createBugReportSession({
+      await store.createBugReportSession({
         diagnostics,
         expiresAt,
+        organisationId: user.organisationId,
         sessionHash: hashSessionToken(sessionToken),
         userId: user.id,
       });
@@ -51,16 +52,17 @@ function registerBugReportRoutes(app, options = {}) {
 
   app.post("/api/bug-reports", async (req, res) => {
     const sessionToken = getSessionToken(req);
+    const organisationId = getOrganisationIdFromSessionToken(sessionToken);
     const sessionHash = sessionToken ? hashSessionToken(sessionToken) : "";
     let session = null;
 
     try {
       requireConfigured(config);
-      if (!sessionHash) {
+      if (!sessionHash || !organisationId) {
         throw new BugReportError("This bug report link is missing or invalid.", 401);
       }
 
-      session = store.claimBugReportSession(sessionHash, Date.now());
+      session = await store.claimBugReportSession(organisationId, sessionHash, Date.now());
       if (!session) {
         throw new BugReportError(
           "This bug report link has expired or has already been used. Open a new report from the add-in.",
@@ -76,7 +78,11 @@ function registerBugReportRoutes(app, options = {}) {
       });
 
       try {
-        const consumed = store.consumeBugReportSession(sessionHash, Date.now());
+        const consumed = await store.consumeBugReportSession(
+          organisationId,
+          sessionHash,
+          Date.now()
+        );
         if (!consumed) {
           console.error("A submitted bug report session could not be marked as consumed.");
         }
@@ -91,7 +97,7 @@ function registerBugReportRoutes(app, options = {}) {
     } catch (error) {
       if (session) {
         try {
-          store.releaseBugReportSession(sessionHash);
+          await store.releaseBugReportSession(organisationId, sessionHash);
         } catch (releaseError) {
           console.error("A failed bug report session could not be released.", releaseError);
         }
@@ -288,6 +294,19 @@ function getSessionToken(req) {
 
 function hashSessionToken(value) {
   return crypto.createHash("sha256").update(`bug-report:${value}`).digest("base64url");
+}
+
+function createTenantSessionToken(organisationId) {
+  return `${organisationId}.${crypto.randomBytes(32).toString("base64url")}`;
+}
+
+function getOrganisationIdFromSessionToken(token) {
+  const prefix = String(token || "").split(".", 1)[0];
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+    prefix
+  )
+    ? prefix
+    : "";
 }
 
 function getPublicOrigin(req, env) {

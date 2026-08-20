@@ -3,6 +3,17 @@
   "module": "index.ts",
   "type": "module",
   "private": true,
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "bun run --cwd apps/web dev",
+    "build:web": "bun run --cwd apps/web build",
+    "build:addin": "npm --prefix \"Halo Email Integration\" run build",
+    "build": "bun run build:web && bun run build:addin",
+    "check": "bun run --cwd apps/web check",
+    "preview": "bun run --cwd apps/web preview"
+  },
   "devDependencies": {
     "@types/bun": "latest",
     "generator-office": "^3.0.2",
