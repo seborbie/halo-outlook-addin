@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <OfficeApp xmlns="http://schemas.microsoft.com/office/appforoffice/1.1" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:bt="http://schemas.microsoft.com/office/officeappbasictypes/1.0" xmlns:mailappor="http://schemas.microsoft.com/office/mailappversionoverrides/1.0" xsi:type="MailApp">
   <Id>55bbcff2-8191-4411-aec6-f9d2f9b4b5e8</Id>
-  <Version>2026.8.24.0</Version>
+  <Version>2026.8.24.1</Version>
   <ProviderName>Digital Origin Solutions</ProviderName>
   <DefaultLocale>en-US</DefaultLocale>
   <DisplayName DefaultValue="HaloPSA Outlook Add-in"/>
@@ -103,7 +103,7 @@
         <bt:Image id="Icon.80x80" DefaultValue="https://localhost:3000/assets/halo-mark-80-v3.png"/>
       </bt:Images>
       <bt:Urls>
-        <bt:Url id="Commands.Url" DefaultValue="https://localhost:3000/commands.html?v=2026.8.24.0"/>
+        <bt:Url id="Commands.Url" DefaultValue="https://localhost:3000/commands.html?v=2026.8.24.1"/>
         <bt:Url id="Taskpane.Url" DefaultValue="https://localhost:3000/taskpane.html"/>
       </bt:Urls>
       <bt:ShortStrings>
@@ -190,10 +190,10 @@
           <bt:Image id="Icon.80x80" DefaultValue="https://localhost:3000/assets/halo-mark-80-v3.png"/>
         </bt:Images>
         <bt:Urls>
-          <bt:Url id="Commands.Url" DefaultValue="https://localhost:3000/commands.html?v=2026.8.24.0"/>
+          <bt:Url id="Commands.Url" DefaultValue="https://localhost:3000/commands.html?v=2026.8.24.1"/>
           <bt:Url id="Taskpane.Url" DefaultValue="https://localhost:3000/taskpane.html"/>
-          <bt:Url id="WebViewRuntime.Url" DefaultValue="https://localhost:3000/commands.html?v=2026.8.24.0"/>
-          <bt:Url id="JSRuntime.Url" DefaultValue="https://localhost:3000/public/classic-send-runtime.js?v=2026.8.24.0"/>
+          <bt:Url id="WebViewRuntime.Url" DefaultValue="https://localhost:3000/commands.html?v=2026.8.24.1"/>
+          <bt:Url id="JSRuntime.Url" DefaultValue="https://localhost:3000/public/classic-send-runtime.js?v=2026.8.24.1"/>
         </bt:Urls>
         <bt:ShortStrings>
           <bt:String id="GroupLabel" DefaultValue="HaloPSA"/>

@@ -392,7 +392,7 @@ For the `2026.8.24` release:
 3. Deploy the immutable `sha-<commit>` tag and verify the container is running with the same
    `PUBLIC_BASE_URL`, encryption key, Halo OAuth settings, Microsoft Entra application ID, and
    TLS-required database endpoint, username, and password used for the release.
-4. Download or build `dist/manifest.xml`; confirm it contains version `2026.8.24.0`, the production
+4. Download or build `dist/manifest.xml`; confirm it contains version `2026.8.24.1`, the production
    add-in ID, and no localhost or development labels.
 5. Upload `dist/manifest.xml` through Microsoft 365 Integrated Apps and accept the event-based
    activation capability update. Assign it to a pilot group before broad deployment.

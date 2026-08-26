@@ -19,6 +19,7 @@ const urlDev = `${urlDevOrigin}/`;
 const developmentManifestId = "e3c74ceb-c7d1-4264-a732-749a0d34c412";
 const developmentManifestVersion = `${packageInfo.version}.2`;
 const developmentRuntimeCacheToken = `${developmentManifestVersion}-references-1`;
+const productionRuntimeCacheToken = `${packageInfo.version}.1`;
 
 function createDevelopmentManifest(content) {
   const source = content.toString();
@@ -180,7 +181,7 @@ module.exports = async (env, options) => {
             .readFileSync(path.resolve(__dirname, "src", "commands", "commands.html"), "utf8")
             .replace(
               /__HALO_RUNTIME_CACHE_TOKEN__/g,
-              dev ? developmentRuntimeCacheToken : `${packageInfo.version}.0`
+              dev ? developmentRuntimeCacheToken : productionRuntimeCacheToken
             ),
       }),
     ],

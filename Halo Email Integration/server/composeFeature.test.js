@@ -20,9 +20,9 @@ function run() {
   assert.match(manifest, /<Set Name="Mailbox" MinVersion="1\.12"\/>/);
   assert.match(manifest, /<Permissions>ReadWriteMailbox<\/Permissions>/);
   assert.match(manifest, /<Id>55bbcff2-8191-4411-aec6-f9d2f9b4b5e8<\/Id>/);
-  assert.match(manifest, /<Version>2026\.8\.24\.0<\/Version>/);
-  assert.match(manifest, /commands\.html\?v=2026\.8\.24\.0/);
-  assert.match(manifest, /classic-send-runtime\.js\?v=2026\.8\.24\.0/);
+  assert.match(manifest, /<Version>2026\.8\.24\.1<\/Version>/);
+  assert.match(manifest, /commands\.html\?v=2026\.8\.24\.1/);
+  assert.match(manifest, /classic-send-runtime\.js\?v=2026\.8\.24\.1/);
   assert.doesNotMatch(manifest, /DEV - HaloPSA|HaloPSA DEV|DEV: Attach/);
   assert.match(manifest, /ExtensionPoint xsi:type="MessageComposeCommandSurface"/);
   assert.match(

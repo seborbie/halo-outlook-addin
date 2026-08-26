@@ -24,13 +24,13 @@ function run() {
     "Production builds must not ship the localhost diagnostics manifest."
   );
   assert.match(manifest, /<Id>55bbcff2-8191-4411-aec6-f9d2f9b4b5e8<\/Id>/);
-  assert.match(manifest, /<Version>2026\.8\.24\.0<\/Version>/);
+  assert.match(manifest, /<Version>2026\.8\.24\.1<\/Version>/);
   assert.match(manifest, /<Permissions>ReadWriteMailbox<\/Permissions>/);
-  assert.match(manifest, /classic-send-runtime\.js\?v=2026\.8\.24\.0/);
+  assert.match(manifest, /classic-send-runtime\.js\?v=2026\.8\.24\.1/);
   assert.doesNotMatch(manifest, /localhost|your-addin-host|__HALO_|DEV -|HaloPSA DEV|DEV:/i);
   assert.doesNotMatch(runtime, /__HALO_PUBLIC_BASE_URL__/);
   assert.match(runtime, /https:\/\/[^"']+\/api\/halo\/tickets\//);
-  assert.match(commands, /classic-send-runtime\.js\?v=2026\.8\.24\.0/);
+  assert.match(commands, /classic-send-runtime\.js\?v=2026\.8\.24\.1/);
   assert.doesNotMatch(commands, /diagnostics-2/);
   assert.match(taskpane, /v2026\.8\.24/);
 
