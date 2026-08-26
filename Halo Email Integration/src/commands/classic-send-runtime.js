@@ -27,7 +27,7 @@
   var EMAIL_ATTACHMENT_READ_RETRY_DELAYS_MS = [150, 350];
   var EMAIL_ATTACHMENT_CONTENT_READ_TIMEOUT_MS = 15000;
   var EMAIL_ATTACHMENT_EVENT_BUDGET_MS = 4 * 60 * 1000;
-  var RECOVERY_TIMEOUT_MS = 6000;
+  var RECOVERY_TIMEOUT_MS = 4500;
   var recoveryFlights = {};
 
   function onHaloMessageSend(event) {
