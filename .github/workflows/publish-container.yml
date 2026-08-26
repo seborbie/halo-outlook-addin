@@ -19,6 +19,24 @@ jobs:
   build-and-publish:
     name: Verify, build, and publish
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: haloaddin
+          POSTGRES_PASSWORD: haloaddin_ci
+          POSTGRES_USER: haloaddin
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U haloaddin -d haloaddin"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      TEST_DATABASE_URL: postgresql://127.0.0.1:5432/haloaddin
+      TEST_DATABASE_USERNAME: haloaddin
+      TEST_DATABASE_PASSWORD: haloaddin_ci
     permissions:
       contents: read
       packages: write
@@ -54,13 +72,43 @@ jobs:
         working-directory: ${{ env.APP_DIRECTORY }}
         run: npm run lint
 
+      - name: Type-check
+        working-directory: ${{ env.APP_DIRECTORY }}
+        run: npm run typecheck
+
       - name: Run authentication tests
         working-directory: ${{ env.APP_DIRECTORY }}
-        run: npm run test:auth
+        run: |
+          npm run test:store
+          npm run test:auth
+
+      - name: Run email attachment tests
+        working-directory: ${{ env.APP_DIRECTORY }}
+        run: npm run test:email-attachments
+
+      - name: Run inline image and Halo attachment tests
+        working-directory: ${{ env.APP_DIRECTORY }}
+        run: |
+          npm run test:inline-images
+          npm run test:halo-attachment
+
+      - name: Run supporting server tests
+        working-directory: ${{ env.APP_DIRECTORY }}
+        run: |
+          npm run test:bug-reports
+          npm run test:compose-feature
+          npm run test:status-route
+          npm run test:ticket-creation
+          npm run test:ticket-creation-routes
+          npm run test:ticket-search
 
       - name: Run send runtime tests
         working-directory: ${{ env.APP_DIRECTORY }}
         run: npm run test:send-runtime
+
+      - name: Build development assets
+        working-directory: ${{ env.APP_DIRECTORY }}
+        run: npm run build:dev
 
       - name: Build production assets
         working-directory: ${{ env.APP_DIRECTORY }}
@@ -70,7 +118,9 @@ jobs:
 
       - name: Test built send runtime
         working-directory: ${{ env.APP_DIRECTORY }}
-        run: npm run test:send-runtime:built
+        run: |
+          npm run test:send-runtime:built
+          npm run test:release-artifacts
 
       - name: Validate production manifest
         working-directory: ${{ env.APP_DIRECTORY }}
@@ -104,7 +154,7 @@ jobs:
           flavor: latest=false
           tags: |
             type=raw,value=${{ steps.version.outputs.value }}
-            type=raw,value=latest-beta
+            type=raw,value=latest
             type=sha,prefix=sha-
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}

@@ -1,24 +1,27 @@
 <!-- Copyright (c) Microsoft Corporation. All rights reserved. Licensed under the MIT License. -->
 
-<!DOCTYPE html>
+<!doctype html>
 <html>
-
-<head>
+  <head>
     <meta charset="UTF-8" />
     <meta http-equiv="X-UA-Compatible" content="IE=Edge" />
 
     <!-- Office JavaScript API -->
-    <script type="text/javascript" src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
+    <script
+      type="text/javascript"
+      src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"
+    ></script>
     <!-- The HTML runtime used by new Outlook must initialize Office.js before registering handlers. -->
     <script type="text/javascript">
-        Office.onReady(function () {});
+      Office.onReady(function () {});
     </script>
     <!-- Keep the send-critical event runtime independent from the task pane webpack bundle. -->
     <!-- webpackIgnore: true -->
-    <script type="text/javascript" src="/public/classic-send-runtime.js"></script>
-</head>
+    <script
+      type="text/javascript"
+      src="/public/classic-send-runtime.js?v=__HALO_RUNTIME_CACHE_TOKEN__"
+    ></script>
+  </head>
 
-<body>
-</body>
-
+  <body></body>
 </html>

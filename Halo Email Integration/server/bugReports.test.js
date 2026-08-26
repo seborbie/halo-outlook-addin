@@ -8,7 +8,7 @@ const {
   hashSessionToken,
   registerBugReportRoutes,
 } = require("./bugReports");
-const { createHaloStore } = require("./haloStore");
+const { createTestStore } = require("./testDatabase");
 
 function createMockApp() {
   const routes = { POST: new Map() };
@@ -51,10 +51,10 @@ async function invoke(app, path, request = {}) {
   return response;
 }
 
-function createHarness(options = {}) {
+async function createHarness(options = {}) {
   const app = createMockApp();
-  const store = options.store || createHaloStore({ dbPath: ":memory:" });
-  const user = store.upsertUser({
+  const store = options.store || (await createTestStore());
+  const user = await store.upsertUser({
     displayName: "Support User",
     email: "support@example.com",
     objectId: "object-1",
@@ -91,11 +91,11 @@ function tokenFromSessionResponse(response) {
 }
 
 test("authenticated add-in users can submit one identity-redacted GitHub issue", async () => {
-  const { app, issues, store } = createHarness();
+  const { app, issues, store } = await createHarness();
   const sessionResponse = await invoke(app, "/api/bug-reports/session", {
     body: {
       diagnostics: {
-        addInVersion: "2026.7.10-beta",
+        addInVersion: "2026.8.24",
         emailSubject: "must not be collected",
         officeVersion: "16.0.1",
         outlookHost: "Outlook",
@@ -130,7 +130,7 @@ test("authenticated add-in users can submit one identity-redacted GitHub issue",
   assert.doesNotMatch(issues[0].body, /support@example\.com/);
   assert.doesNotMatch(issues[0].body, /## Reporter/);
   assert.match(issues[0].body, /Reporter name and email.*were not included/);
-  assert.match(issues[0].body, /2026\.7\.10-beta/);
+  assert.match(issues[0].body, /2026\.8\.24/);
   assert.doesNotMatch(issues[0].body, /must not be collected/);
   assert.doesNotMatch(issues[0].body, /\u0000/);
   assert.doesNotMatch(issues[0].body, /!\[tracking\]/);
@@ -142,11 +142,11 @@ test("authenticated add-in users can submit one identity-redacted GitHub issue",
   });
   assert.equal(reusedResponse.statusCode, 401);
   assert.equal(issues.length, 1);
-  store.close();
+  await store.close();
 });
 
 test("non-local report links use the configured public origin", async () => {
-  const { app, store } = createHarness();
+  const { app, store } = await createHarness();
   const response = await invoke(app, "/api/bug-reports/session", {
     headers: {
       host: "internal-container:3000",
@@ -156,12 +156,12 @@ test("non-local report links use the configured public origin", async () => {
 
   assert.equal(response.statusCode, 201);
   assert.match(response.body.url, /^https:\/\/production\.example\.com\/bugreport#token=/);
-  store.close();
+  await store.close();
 });
 
 test("a transient GitHub failure releases the session for retry", async () => {
   let attempts = 0;
-  const { app, store } = createHarness({
+  const { app, store } = await createHarness({
     githubClient: {
       async createIssue() {
         attempts += 1;
@@ -186,18 +186,18 @@ test("a transient GitHub failure releases the session for retry", async () => {
   assert.equal(retry.statusCode, 201);
   assert.equal(retry.body.reference, 99);
   assert.equal(attempts, 2);
-  store.close();
+  await store.close();
 });
 
 test("a release failure does not replace the original validation response", async () => {
-  const realStore = createHaloStore({ dbPath: ":memory:" });
+  const realStore = await createTestStore();
   const store = {
     ...realStore,
     releaseBugReportSession() {
       throw new Error("release failed");
     },
   };
-  const { app } = createHarness({ store });
+  const { app } = await createHarness({ store });
   const sessionResponse = await invoke(app, "/api/bug-reports/session");
   const token = tokenFromSessionResponse(sessionResponse);
   const originalConsoleError = console.error;
@@ -212,12 +212,12 @@ test("a release failure does not replace the original validation response", asyn
     assert.match(response.body.error, /What happened is required/);
   } finally {
     console.error = originalConsoleError;
-    realStore.close();
+    await realStore.close();
   }
 });
 
 test("a successful GitHub issue remains successful if session consumption fails", async () => {
-  const realStore = createHaloStore({ dbPath: ":memory:" });
+  const realStore = await createTestStore();
   let releaseCalls = 0;
   const store = {
     ...realStore,
@@ -229,7 +229,7 @@ test("a successful GitHub issue remains successful if session consumption fails"
       return realStore.releaseBugReportSession(sessionHash);
     },
   };
-  const { app } = createHarness({ store });
+  const { app } = await createHarness({ store });
   const sessionResponse = await invoke(app, "/api/bug-reports/session");
   const token = tokenFromSessionResponse(sessionResponse);
   const originalConsoleError = console.error;
@@ -250,17 +250,17 @@ test("a successful GitHub issue remains successful if session consumption fails"
     });
     assert.equal(duplicate.statusCode, 401);
     assert.equal(
-      realStore.claimBugReportSession(hashSessionToken(token), Date.now() + 61 * 1000),
+      await realStore.claimBugReportSession(hashSessionToken(token), Date.now() + 61 * 1000),
       null
     );
   } finally {
     console.error = originalConsoleError;
-    realStore.close();
+    await realStore.close();
   }
 });
 
 test("unconfigured reporting returns 503 without creating a session", async () => {
-  const { app, store } = createHarness({
+  const { app, store } = await createHarness({
     env: {
       BUG_REPORT_GITHUB_REPOSITORY: "",
       BUG_REPORT_GITHUB_TOKEN: "",
@@ -269,7 +269,7 @@ test("unconfigured reporting returns 503 without creating a session", async () =
   const response = await invoke(app, "/api/bug-reports/session");
   assert.equal(response.statusCode, 503);
   assert.match(response.body.error, /temporarily unavailable/i);
-  store.close();
+  await store.close();
 });
 
 test("unexpected server failures do not leak implementation details", async () => {
@@ -285,7 +285,7 @@ test("unexpected server failures do not leak implementation details", async () =
     requireMicrosoftUser: async () => ({ id: 1 }),
     store: {
       createBugReportSession() {
-        throw new Error("SQLITE_SECRET_FILE_PATH");
+        throw new Error("DATABASE_SECRET_URL");
       },
     },
   });
@@ -294,14 +294,14 @@ test("unexpected server failures do not leak implementation details", async () =
     const response = await invoke(app, "/api/bug-reports/session");
     assert.equal(response.statusCode, 500);
     assert.match(response.body.error, /Unexpected bug report submission error/);
-    assert.doesNotMatch(response.body.error, /SQLITE_SECRET_FILE_PATH/);
+    assert.doesNotMatch(response.body.error, /DATABASE_SECRET_URL/);
   } finally {
     console.error = originalConsoleError;
   }
 });
 
 test("report fields and authenticated sessions are validated", async () => {
-  const { app, store } = createHarness();
+  const { app, store } = await createHarness();
   const missingToken = await invoke(app, "/api/bug-reports", {
     body: { description: "Details", summary: "Missing token" },
   });
@@ -332,11 +332,11 @@ test("report fields and authenticated sessions are validated", async () => {
     headers: { "x-bug-report-session": token },
   });
   assert.equal(retryAfterValidation.statusCode, 201);
-  store.close();
+  await store.close();
 });
 
 test("expired sessions and unauthenticated session requests are rejected", async () => {
-  const { app, store, user } = createHarness({
+  const { app, store, user } = await createHarness({
     requireMicrosoftUser: async () => {
       throw new BugReportError("Microsoft add-in authentication is required.", 401);
     },
@@ -344,14 +344,14 @@ test("expired sessions and unauthenticated session requests are rejected", async
   const unauthenticated = await invoke(app, "/api/bug-reports/session");
   assert.equal(unauthenticated.statusCode, 401);
 
-  store.createBugReportSession({
+  await store.createBugReportSession({
     diagnostics: {},
     expiresAt: Date.now() - 1,
     sessionHash: "expired-session-hash",
     userId: user.id,
   });
-  assert.equal(store.claimBugReportSession("expired-session-hash", Date.now()), null);
-  store.close();
+  assert.equal(await store.claimBugReportSession("expired-session-hash", Date.now()), null);
+  await store.close();
 });
 
 test("the GitHub client uses a scoped issue creation request", async () => {

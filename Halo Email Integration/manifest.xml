@@ -1,11 +1,11 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <OfficeApp xmlns="http://schemas.microsoft.com/office/appforoffice/1.1" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:bt="http://schemas.microsoft.com/office/officeappbasictypes/1.0" xmlns:mailappor="http://schemas.microsoft.com/office/mailappversionoverrides/1.0" xsi:type="MailApp">
   <Id>55bbcff2-8191-4411-aec6-f9d2f9b4b5e8</Id>
-  <Version>2026.7.10.2</Version>
+  <Version>2026.8.24.0</Version>
   <ProviderName>Digital Origin Solutions</ProviderName>
   <DefaultLocale>en-US</DefaultLocale>
   <DisplayName DefaultValue="HaloPSA Outlook Add-in"/>
-  <Description DefaultValue="Search HaloPSA tickets and attach the open Outlook email."/>
+  <Description DefaultValue="Attach Outlook email to a HaloPSA ticket or create a new ticket."/>
   <IconUrl DefaultValue="https://localhost:3000/assets/halo-mark-64-v3.png"/>
   <HighResolutionIconUrl DefaultValue="https://localhost:3000/assets/halo-mark-128-v3.png"/>
   <SupportUrl DefaultValue="https://localhost:3000"/>
@@ -33,7 +33,7 @@
       </DesktopSettings>
     </Form>
   </FormSettings>
-  <Permissions>ReadWriteItem</Permissions>
+  <Permissions>ReadWriteMailbox</Permissions>
   <Rule xsi:type="RuleCollection" Mode="Or">
     <Rule xsi:type="ItemIs" ItemType="Message" FormType="Read"/>
     <Rule xsi:type="ItemIs" ItemType="Message" FormType="Edit"/>
@@ -103,15 +103,15 @@
         <bt:Image id="Icon.80x80" DefaultValue="https://localhost:3000/assets/halo-mark-80-v3.png"/>
       </bt:Images>
       <bt:Urls>
-        <bt:Url id="Commands.Url" DefaultValue="https://localhost:3000/commands.html"/>
+        <bt:Url id="Commands.Url" DefaultValue="https://localhost:3000/commands.html?v=2026.8.24.0"/>
         <bt:Url id="Taskpane.Url" DefaultValue="https://localhost:3000/taskpane.html"/>
       </bt:Urls>
       <bt:ShortStrings>
         <bt:String id="GroupLabel" DefaultValue="HaloPSA"/>
-        <bt:String id="TaskpaneButton.Label" DefaultValue="Attach Email to Ticket"/>
+        <bt:String id="TaskpaneButton.Label" DefaultValue="Attach or Create Ticket"/>
       </bt:ShortStrings>
       <bt:LongStrings>
-        <bt:String id="TaskpaneButton.Tooltip" DefaultValue="Search HaloPSA tickets and attach the open Outlook email."/>
+        <bt:String id="TaskpaneButton.Tooltip" DefaultValue="Attach the Outlook email to a HaloPSA ticket or create a new ticket."/>
       </bt:LongStrings>
     </Resources>
     <VersionOverrides xmlns="http://schemas.microsoft.com/office/mailappversionoverrides/1.1" xsi:type="VersionOverridesV1_1">
@@ -176,6 +176,7 @@
             <ExtensionPoint xsi:type="LaunchEvent">
               <LaunchEvents>
                 <LaunchEvent Type="OnMessageSend" FunctionName="onHaloMessageSend" SendMode="PromptUser"/>
+                <LaunchEvent Type="OnMessageAttachmentsChanged" FunctionName="onHaloMessageAttachmentsChanged"/>
               </LaunchEvents>
               <SourceLocation resid="WebViewRuntime.Url"/>
             </ExtensionPoint>
@@ -189,17 +190,17 @@
           <bt:Image id="Icon.80x80" DefaultValue="https://localhost:3000/assets/halo-mark-80-v3.png"/>
         </bt:Images>
         <bt:Urls>
-          <bt:Url id="Commands.Url" DefaultValue="https://localhost:3000/commands.html"/>
+          <bt:Url id="Commands.Url" DefaultValue="https://localhost:3000/commands.html?v=2026.8.24.0"/>
           <bt:Url id="Taskpane.Url" DefaultValue="https://localhost:3000/taskpane.html"/>
-          <bt:Url id="WebViewRuntime.Url" DefaultValue="https://localhost:3000/commands.html"/>
-          <bt:Url id="JSRuntime.Url" DefaultValue="https://localhost:3000/public/classic-send-runtime.js"/>
+          <bt:Url id="WebViewRuntime.Url" DefaultValue="https://localhost:3000/commands.html?v=2026.8.24.0"/>
+          <bt:Url id="JSRuntime.Url" DefaultValue="https://localhost:3000/public/classic-send-runtime.js?v=2026.8.24.0"/>
         </bt:Urls>
         <bt:ShortStrings>
           <bt:String id="GroupLabel" DefaultValue="HaloPSA"/>
-          <bt:String id="TaskpaneButton.Label" DefaultValue="Attach Email to Ticket"/>
+          <bt:String id="TaskpaneButton.Label" DefaultValue="Attach or Create Ticket"/>
         </bt:ShortStrings>
         <bt:LongStrings>
-          <bt:String id="TaskpaneButton.Tooltip" DefaultValue="Search HaloPSA tickets and attach the open Outlook email."/>
+          <bt:String id="TaskpaneButton.Tooltip" DefaultValue="Attach the Outlook email to a HaloPSA ticket or create a new ticket."/>
         </bt:LongStrings>
       </Resources>
     </VersionOverrides>

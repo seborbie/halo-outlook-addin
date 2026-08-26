@@ -42,7 +42,9 @@
         <div>
           <p class="halo-app__eyebrow">Outlook integration</p>
           <h1 id="page-title">Attach Email to Ticket</h1>
-          <p class="halo-app__subtitle">Add the open Outlook email to the right HaloPSA ticket.</p>
+          <p id="page-subtitle" class="halo-app__subtitle">
+            Add the open Outlook email to the right HaloPSA ticket.
+          </p>
         </div>
       </section>
 
@@ -84,15 +86,17 @@
           <svg class="halo-status__icon-loading" viewBox="0 0 24 24">
             <path d="M20 12a8 8 0 1 1-2.34-5.66" />
           </svg>
+          <svg class="halo-status__icon-warning" viewBox="0 0 24 24">
+            <path d="M12 3 2.5 20h19L12 3Z" />
+            <path d="M12 9v5M12 17h.01" />
+          </svg>
           <svg class="halo-status__icon-failed" viewBox="0 0 24 24">
             <circle cx="12" cy="12" r="9" />
             <path d="M12 8v5M12 16h.01" />
           </svg>
         </span>
         <div class="halo-status__copy">
-          <p id="status-message" class="halo-status__message">
-            Connect to HaloPSA to start.
-          </p>
+          <p id="status-message" class="halo-status__message">Connect to HaloPSA to start.</p>
           <p id="status-detail" class="halo-status__detail"></p>
           <pre id="debug-detail" class="halo-status__debug" hidden></pre>
         </div>
@@ -104,17 +108,127 @@
         aria-labelledby="ticket-search-heading"
         hidden
       >
-        <section class="halo-card halo-card--search">
+        <section id="compose-selection-panel" class="halo-card halo-compose-selection" hidden>
+          <div>
+            <p class="halo-results__kicker">Attach on send</p>
+            <h2 id="compose-selection-ticket">No ticket selected</h2>
+            <p id="compose-selection-summary"></p>
+            <p id="compose-attachment-status" class="halo-compose-attachment-status" hidden></p>
+          </div>
+          <button id="remove-compose-selection-button" class="halo-link-button" type="button">
+            Remove
+          </button>
+        </section>
+
+        <nav id="ticket-destination-tabs" class="halo-destination-tabs" aria-label="Ticket action">
+          <button
+            id="attach-existing-tab"
+            class="halo-destination-tab"
+            type="button"
+            aria-selected="true"
+          >
+            Attach to existing
+          </button>
+          <button
+            id="create-ticket-tab"
+            class="halo-destination-tab"
+            type="button"
+            aria-selected="false"
+          >
+            Create new ticket
+          </button>
+        </nav>
+
+        <section id="create-ticket-panel" class="halo-card halo-create-ticket" hidden>
+          <div class="halo-results__heading">
+            <div>
+              <p class="halo-results__kicker">Automatic Halo profile</p>
+              <h2>Create a ticket</h2>
+              <p class="halo-create-ticket__help">
+                Fields and required values are loaded from the selected Halo ticket type.
+              </p>
+            </div>
+            <button
+              id="refresh-ticket-types-button"
+              class="halo-icon-button"
+              type="button"
+              aria-label="Refresh Halo ticket types"
+              title="Refresh Halo ticket types"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M20 7v5h-5M4 17v-5h5" />
+                <path d="M6.1 9A7 7 0 0 1 18 6l2 2M18 15a7 7 0 0 1-12 3l-2-2" />
+              </svg>
+            </button>
+          </div>
+
+          <p id="create-ticket-conversation-warning" class="halo-form-warning" hidden></p>
+
+          <form id="create-ticket-form" class="halo-create-form">
+            <label class="halo-form-field" for="create-ticket-type">
+              <span>Ticket type</span>
+              <select id="create-ticket-type" required>
+                <option value="">Loading ticket types…</option>
+              </select>
+            </label>
+
+            <label class="halo-form-field" for="create-ticket-summary">
+              <span>Summary</span>
+              <input id="create-ticket-summary" type="text" maxlength="500" required />
+            </label>
+
+            <div class="halo-form-field">
+              <label for="create-ticket-requester-query">Requester</label>
+              <div class="halo-requester-search">
+                <input
+                  id="create-ticket-requester-query"
+                  type="search"
+                  maxlength="200"
+                  placeholder="Email address or name"
+                />
+                <button id="search-requesters-button" class="halo-button" type="button">
+                  Find
+                </button>
+              </div>
+              <select id="create-ticket-requester" required>
+                <option value="">Choose a Halo requester</option>
+              </select>
+              <small id="create-ticket-requester-help"></small>
+            </div>
+
+            <div id="create-ticket-required-fields" class="halo-create-fields"></div>
+
+            <details id="create-ticket-optional-details" class="halo-create-optional" hidden>
+              <summary>Optional details</summary>
+              <div id="create-ticket-optional-fields" class="halo-create-fields"></div>
+            </details>
+
+            <p id="create-ticket-schema-warning" class="halo-form-warning" hidden></p>
+            <div id="create-action-mode-slot" class="halo-action-mode-slot"></div>
+            <button
+              id="submit-create-ticket-button"
+              class="halo-button halo-button--primary halo-button--wide"
+              type="submit"
+              disabled
+            >
+              Create ticket
+            </button>
+          </form>
+        </section>
+
+        <section class="halo-card halo-card--search halo-attach-existing-panel">
           <div class="halo-section-heading halo-section-heading--compact">
             <span class="halo-section-heading__step">2</span>
             <div>
               <h2 id="ticket-search-heading">Find a ticket</h2>
-              <p>Search any ticket you can access, even when it is assigned to another agent.</p>
+              <p id="ticket-search-help">
+                Search any ticket you can access, even when it is assigned to another agent.
+              </p>
             </div>
           </div>
 
           <form id="ticket-search-form" class="halo-search" role="search">
-            <label class="halo-search__label" for="ticket-number">Ticket number</label>
+            <label class="halo-search__label" for="ticket-query">Search tickets</label>
             <div class="halo-search__controls">
               <div class="halo-input-shell halo-input-shell--search">
                 <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -122,12 +236,13 @@
                   <path d="m16 16 4 4" />
                 </svg>
                 <input
-                  id="ticket-number"
+                  id="ticket-query"
                   type="search"
                   inputmode="text"
-                  placeholder="e.g. 2200"
+                  maxlength="200"
+                  placeholder="e.g. printer offline or 2200"
                   autocomplete="off"
-                  spellcheck="false"
+                  spellcheck="true"
                 />
               </div>
               <button
@@ -138,32 +253,74 @@
                 Search
               </button>
             </div>
-          </form>
 
-          <div id="search-results" class="halo-results" hidden>
-            <div class="halo-results__heading">
-              <h3>Search results</h3>
-              <button id="clear-search-button" class="halo-link-button" type="button">Clear</button>
+            <div class="halo-search__toolbar">
+              <details id="ticket-filters" class="halo-filters">
+                <summary>
+                  <span>Filters</span>
+                  <span id="active-filter-count" class="halo-filter-count" hidden>0</span>
+                </summary>
+                <div class="halo-filters__body">
+                  <div class="halo-filter-grid">
+                    <label class="halo-filter-field" for="ticket-ownership">
+                      <span>Ownership</span>
+                      <select id="ticket-ownership">
+                        <option value="mine" selected>Mine</option>
+                        <option value="all">All agents</option>
+                      </select>
+                    </label>
+                    <label class="halo-filter-field" for="ticket-lifecycle">
+                      <span>Lifecycle</span>
+                      <select id="ticket-lifecycle">
+                        <option value="open" selected>Open</option>
+                        <option value="closed">Closed</option>
+                        <option value="all">Open and closed</option>
+                      </select>
+                    </label>
+                    <label class="halo-filter-field" for="ticket-customer">
+                      <span>Customer</span>
+                      <select id="ticket-customer">
+                        <option value="">Any customer</option>
+                      </select>
+                    </label>
+                    <label class="halo-filter-field" for="ticket-assignee">
+                      <span>Assignee</span>
+                      <select id="ticket-assignee">
+                        <option value="">Any assignee</option>
+                      </select>
+                    </label>
+                  </div>
+                  <div class="halo-filters__footer">
+                    <span>Customer and assignee filter the loaded results.</span>
+                    <button id="reset-ticket-filters-button" class="halo-link-button" type="button">
+                      Reset filters
+                    </button>
+                  </div>
+                </div>
+              </details>
+              <button id="clear-search-button" class="halo-link-button" type="button" hidden>
+                Clear search
+              </button>
             </div>
-            <p id="search-empty" class="halo-empty" hidden>
-              No ticket matched that number. Check the number and try again.
-            </p>
-            <div id="search-list" class="halo-ticket-list"></div>
-          </div>
+          </form>
         </section>
 
-        <section class="halo-card halo-card--tickets" aria-labelledby="tickets-heading">
+        <section
+          class="halo-card halo-card--tickets halo-attach-existing-panel"
+          aria-labelledby="tickets-heading"
+        >
           <div class="halo-results__heading">
             <div>
-              <p class="halo-results__kicker">Quick access</p>
+              <p class="halo-results__kicker">Tickets</p>
               <h2 id="tickets-heading">My open tickets</h2>
+              <p id="ticket-results-count" class="halo-results__count" aria-live="polite"></p>
             </div>
             <button
               id="refresh-tickets-button"
               class="halo-icon-button"
               type="button"
-              aria-label="Refresh my open tickets"
-              title="Refresh my open tickets"
+              aria-label="Refresh ticket results"
+              title="Refresh ticket results"
             >
               <svg viewBox="0 0 24 24" aria-hidden="true">
                 <path d="M20 7v5h-5M4 17v-5h5" />
@@ -171,7 +328,47 @@
               </svg>
             </button>
           </div>
-          <p id="tickets-empty" class="halo-empty" hidden>No open tickets are assigned to you.</p>
+          <div id="ticket-action-mode-slot" class="halo-action-mode-slot">
+            <div id="action-mode-control" class="halo-action-mode">
+              <label class="halo-switch" for="private-note-toggle">
+                <span class="halo-switch__label">
+                  Attach as private note
+                  <span
+                    id="action-mode-visibility"
+                    class="halo-switch__visibility"
+                    data-visibility="email"
+                  >
+                    Customer visible
+                  </span>
+                </span>
+                <input
+                  id="private-note-toggle"
+                  type="checkbox"
+                  role="switch"
+                  aria-describedby="action-mode-help"
+                />
+                <span class="halo-switch__track" aria-hidden="true">
+                  <span class="halo-switch__thumb"></span>
+                </span>
+              </label>
+              <span id="action-mode-help" class="halo-visually-hidden">
+                Email action — visible to customer.
+              </span>
+            </div>
+          </div>
+          <div id="mapped-email-confirmation" class="halo-mapped-confirmation" hidden>
+            <p id="mapped-email-ticket"></p>
+            <button
+              id="attach-mapped-email-button"
+              class="halo-button halo-button--primary halo-button--wide"
+              type="button"
+            >
+              Attach email
+            </button>
+          </div>
+          <p id="tickets-empty" class="halo-empty" aria-live="polite" hidden>
+            No tickets match the current search and filters.
+          </p>
           <div id="tickets-list" class="halo-ticket-list"></div>
         </section>
       </section>
@@ -185,8 +382,42 @@
         <span aria-hidden="true">•</span>
         <span>Secure OAuth connection</span>
         <span aria-hidden="true">•</span>
-        <span>v2026.7.10B (Beta)</span>
+        <span>v2026.8.24</span>
       </footer>
+
+      <section
+        id="attachment-prompt"
+        class="halo-prompt"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="attachment-prompt-title"
+        aria-describedby="attachment-prompt-detail"
+        hidden
+      >
+        <div class="halo-prompt__backdrop"></div>
+        <div class="halo-prompt__card" role="document">
+          <p class="halo-results__kicker">Email attachments</p>
+          <h2 id="attachment-prompt-title">Add attachments to Halo?</h2>
+          <p id="attachment-prompt-detail"></p>
+          <p id="attachment-prompt-limits" class="halo-prompt__limits"></p>
+          <div class="halo-prompt__actions">
+            <button
+              id="attachment-email-only-button"
+              class="halo-button halo-button--quiet"
+              type="button"
+            >
+              Email only
+            </button>
+            <button
+              id="attachment-add-button"
+              class="halo-button halo-button--primary"
+              type="button"
+            >
+              Add attachments
+            </button>
+          </div>
+        </div>
+      </section>
     </main>
   </body>
 </html>

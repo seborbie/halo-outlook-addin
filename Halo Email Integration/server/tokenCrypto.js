@@ -6,6 +6,16 @@ function createTokenCrypto(env = process.env) {
   const key = decodeEncryptionKey(env.HALO_TOKEN_ENCRYPTION_KEY, env);
 
   return {
+    decryptBytes(value, additionalData) {
+      if (!value || value.keyId !== TOKEN_KEY_ID) {
+        throw new Error("The encrypted attachment uses an unsupported encryption key.");
+      }
+      const decipher = crypto.createDecipheriv("aes-256-gcm", key, toBuffer(value.iv));
+      decipher.setAAD(toAdditionalData(additionalData));
+      decipher.setAuthTag(toBuffer(value.tag));
+      return Buffer.concat([decipher.update(toBuffer(value.ciphertext)), decipher.final()]);
+    },
+
     decryptJson(value) {
       const decipher = crypto.createDecipheriv(
         "aes-256-gcm",
@@ -37,7 +47,29 @@ function createTokenCrypto(env = process.env) {
         tag: cipher.getAuthTag().toString("base64"),
       };
     },
+
+    encryptBytes(value, additionalData) {
+      const plaintext = Buffer.isBuffer(value) ? value : Buffer.from(value);
+      const iv = crypto.randomBytes(12);
+      const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
+      cipher.setAAD(toAdditionalData(additionalData));
+      const ciphertext = Buffer.concat([cipher.update(plaintext), cipher.final()]);
+      return {
+        keyId: TOKEN_KEY_ID,
+        iv,
+        ciphertext,
+        tag: cipher.getAuthTag(),
+      };
+    },
   };
+}
+
+function toAdditionalData(value) {
+  return Buffer.isBuffer(value) ? value : Buffer.from(String(value || ""), "utf8");
+}
+
+function toBuffer(value) {
+  return Buffer.isBuffer(value) ? value : Buffer.from(value || "", "base64");
 }
 
 function decodeEncryptionKey(value, env = process.env) {

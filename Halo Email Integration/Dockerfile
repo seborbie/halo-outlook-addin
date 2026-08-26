@@ -9,7 +9,9 @@ COPY . .
 
 ARG PUBLIC_BASE_URL
 ENV PUBLIC_BASE_URL=${PUBLIC_BASE_URL}
-RUN npm run build
+RUN npm run build \
+    && npm prune --omit=dev \
+    && npm cache clean --force
 
 ENV NODE_ENV=production
 ENV PORT=3000

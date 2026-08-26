@@ -2,6 +2,7 @@
 
 const devCerts = require("office-addin-dev-certs");
 const CopyWebpackPlugin = require("copy-webpack-plugin");
+const fs = require("fs");
 const HtmlWebpackPlugin = require("html-webpack-plugin");
 const path = require("path");
 const webpack = require("webpack");
@@ -10,10 +11,35 @@ const packageInfo = require("./package.json");
 require("dotenv").config({ path: path.resolve(__dirname, ".env") });
 
 const { registerHaloAuthRoutes } = require("./server/haloAuth");
+const { createHaloStore } = require("./server/haloStore");
 const { registerStatusRoute } = require("./server/statusRoute");
 
 const urlDevOrigin = "https://localhost:3000";
 const urlDev = `${urlDevOrigin}/`;
+const developmentManifestId = "e3c74ceb-c7d1-4264-a732-749a0d34c412";
+const developmentManifestVersion = `${packageInfo.version}.2`;
+const developmentRuntimeCacheToken = `${developmentManifestVersion}-references-1`;
+
+function createDevelopmentManifest(content) {
+  const source = content.toString();
+  const manifest = source
+    .replace(/<Id>[^<]+<\/Id>/, `<Id>${developmentManifestId}</Id>`)
+    .replace(/<Version>[^<]+<\/Version>/, `<Version>${developmentManifestVersion}</Version>`)
+    .replace(
+      /<DisplayName DefaultValue="[^"]+"\/>/,
+      '<DisplayName DefaultValue="LOCAL DIAGNOSTICS - HaloPSA Outlook Add-in"/>'
+    )
+    .replace(
+      /<Description DefaultValue="[^"]+"\/>/,
+      '<Description DefaultValue="Local HaloPSA Outlook add-in with Smart Alerts diagnostics."/>'
+    )
+    .replace(/\?v=[^"<]+/g, `?v=${developmentRuntimeCacheToken}`);
+
+  if (!manifest.includes(`<Id>${developmentManifestId}</Id>`)) {
+    throw new Error("The local diagnostics manifest ID could not be generated.");
+  }
+  return manifest;
+}
 
 function getProductionBaseUrl(value) {
   if (!value) {
@@ -49,6 +75,11 @@ async function getHttpsOptions() {
 
 module.exports = async (env, options) => {
   const dev = options.mode === "development";
+  const serving = Boolean(env && env.WEBPACK_SERVE);
+  const store = serving ? createHaloStore() : null;
+  if (store) {
+    await store.initialize();
+  }
   const publicBaseUrl = dev ? urlDev : getProductionBaseUrl(process.env.PUBLIC_BASE_URL);
   const publicOrigin = publicBaseUrl.replace(/\/+$/, "");
   const config = {
@@ -59,7 +90,7 @@ module.exports = async (env, options) => {
       taskpane: ["./src/taskpane/taskpane.ts", "./src/taskpane/taskpane.html"],
     },
     output: {
-      clean: false,
+      clean: true,
     },
     resolve: {
       extensions: [".ts", ".html", ".js"],
@@ -128,17 +159,37 @@ module.exports = async (env, options) => {
               }
             },
           },
+          ...(dev
+            ? [
+                {
+                  from: "manifest.xml",
+                  to: "manifest.debug.xml",
+                  transform(content) {
+                    return createDevelopmentManifest(content);
+                  },
+                },
+              ]
+            : []),
         ],
       }),
       new HtmlWebpackPlugin({
         filename: "commands.html",
-        template: "./src/commands/commands.html",
         inject: false,
+        templateContent: () =>
+          fs
+            .readFileSync(path.resolve(__dirname, "src", "commands", "commands.html"), "utf8")
+            .replace(
+              /__HALO_RUNTIME_CACHE_TOKEN__/g,
+              dev ? developmentRuntimeCacheToken : `${packageInfo.version}.0`
+            ),
       }),
     ],
     devServer: {
       headers: {
         "Access-Control-Allow-Origin": "*",
+        "Cache-Control": "no-store, no-cache, must-revalidate",
+        Expires: "0",
+        Pragma: "no-cache",
       },
       static: {
         directory: path.join(__dirname, "dist"),
@@ -152,8 +203,12 @@ module.exports = async (env, options) => {
           throw new Error("webpack-dev-server is not available for Halo auth routes.");
         }
 
-        registerHaloAuthRoutes(devServer.app);
-        registerStatusRoute(devServer.app);
+        registerHaloAuthRoutes(devServer.app, { store });
+        registerStatusRoute(devServer.app, { checkReady: () => store.isReady() });
+        console.info(
+          "[halo-dev] Local server ready. Sideload dist/manifest.debug.xml with npm start; " +
+            "running npm run dev-server alone does not update Outlook's add-in registration."
+        );
         return middlewares;
       },
       server: {
@@ -168,4 +223,11 @@ module.exports = async (env, options) => {
   };
 
   return config;
+};
+
+module.exports._test = {
+  createDevelopmentManifest,
+  developmentManifestId,
+  developmentManifestVersion,
+  developmentRuntimeCacheToken,
 };

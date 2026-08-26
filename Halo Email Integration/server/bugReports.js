@@ -33,7 +33,7 @@ function registerBugReportRoutes(app, options = {}) {
       const sessionToken = crypto.randomBytes(32).toString("base64url");
       const expiresAt = Date.now() + config.sessionTtlMinutes * 60 * 1000;
 
-      store.createBugReportSession({
+      await store.createBugReportSession({
         diagnostics,
         expiresAt,
         sessionHash: hashSessionToken(sessionToken),
@@ -60,7 +60,7 @@ function registerBugReportRoutes(app, options = {}) {
         throw new BugReportError("This bug report link is missing or invalid.", 401);
       }
 
-      session = store.claimBugReportSession(sessionHash, Date.now());
+      session = await store.claimBugReportSession(sessionHash, Date.now());
       if (!session) {
         throw new BugReportError(
           "This bug report link has expired or has already been used. Open a new report from the add-in.",
@@ -76,7 +76,7 @@ function registerBugReportRoutes(app, options = {}) {
       });
 
       try {
-        const consumed = store.consumeBugReportSession(sessionHash, Date.now());
+        const consumed = await store.consumeBugReportSession(sessionHash, Date.now());
         if (!consumed) {
           console.error("A submitted bug report session could not be marked as consumed.");
         }
@@ -91,7 +91,7 @@ function registerBugReportRoutes(app, options = {}) {
     } catch (error) {
       if (session) {
         try {
-          store.releaseBugReportSession(sessionHash);
+          await store.releaseBugReportSession(sessionHash);
         } catch (releaseError) {
           console.error("A failed bug report session could not be released.", releaseError);
         }
