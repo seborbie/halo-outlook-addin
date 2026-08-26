@@ -3,6 +3,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
 const crypto = require("node:crypto");
+const webpackTest = require(path.join(__dirname, "..", "webpack.config.js"))._test;
 
 const marker = {
   version: 1,
@@ -61,9 +62,10 @@ function run() {
       /https:\/\/[^"']+\/api\/halo\/email\/send-auto-attach/,
       "The built event runtime must use an absolute HTTPS API URL."
     );
-    assert.match(
-      commandsHtml,
-      /classic-send-runtime\.js\?v=2026\.8\.24\.(?:0|2-references-1)/,
+    assert(
+      [webpackTest.productionRuntimeCacheToken, webpackTest.developmentRuntimeCacheToken].some(
+        (token) => commandsHtml.includes(`/public/classic-send-runtime.js?v=${token}`)
+      ),
       "The built commands runtime must use the release or diagnostics cache token."
     );
   }

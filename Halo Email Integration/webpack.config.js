@@ -231,4 +231,5 @@ module.exports._test = {
   developmentManifestId,
   developmentManifestVersion,
   developmentRuntimeCacheToken,
+  productionRuntimeCacheToken,
 };
