@@ -83,7 +83,7 @@ function run() {
   testStaleInheritedSelection(runtime, runtimePath);
   testExplicitNoSessionWarning(runtime, runtimePath);
   testExplicitUnexpectedResponseWarning(runtime, runtimePath);
-  testExplicitRequestTimeout(runtime, runtimePath);
+  testExplicitHardTimeout(runtime, runtimePath);
   testPrefetchedInlineImagesAvoidContentReads(runtime, runtimePath);
   testLegacyWebCryptoPrefetchReuse(runtime, runtimePath);
   testEncodedContentIdPrefetchReuse(runtime, runtimePath);
@@ -247,7 +247,7 @@ function testUnselectedWatchdog(runtime, runtimePath) {
   });
   harness.send();
   assert.strictEqual(harness.completions.length, 0);
-  harness.fireTimer(25000);
+  harness.fireTimer(4900);
   assert.strictEqual(harness.completions.length, 1);
   assert.strictEqual(harness.completions[0].allowEvent, true);
 }
@@ -436,14 +436,14 @@ function testExplicitUnexpectedResponseWarning(runtime, runtimePath) {
   assert.match(harness.completions[0].errorMessage, /T1001/);
 }
 
-function testExplicitRequestTimeout(runtime, runtimePath) {
+function testExplicitHardTimeout(runtime, runtimePath) {
   const harness = createHarness(runtime, runtimePath, {
     hangRequest: true,
     sessionMarker: marker,
   });
   harness.send();
   assert.strictEqual(harness.completions.length, 0);
-  harness.fireTimer(20000);
+  harness.fireTimer(4900);
 
   assert.strictEqual(harness.completions.length, 1);
   assert.strictEqual(harness.completions[0].allowEvent, false);
@@ -768,7 +768,7 @@ function testAutomaticPreparedAttachmentsBlockOnWatchdog(runtime, runtimePath) {
     hangRequest: true,
   });
   harness.send();
-  harness.fireTimer(25000);
+  harness.fireTimer(4900);
 
   assert.strictEqual(harness.completions.length, 1);
   assert.strictEqual(harness.completions[0].allowEvent, false);
